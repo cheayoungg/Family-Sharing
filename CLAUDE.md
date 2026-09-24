@@ -27,11 +27,11 @@ Persistence is Spring Data JPA over PostgreSQL. Auth is stateless JWT (`io.jsonw
 
 `application.yml` only selects the active profile (`SPRING_PROFILES_ACTIVE`, default `local`); all environment-specific values live in the per-profile files and are read from environment variables — no DB credentials are ever committed:
 
-- `application-local.yml` — for local development against a local PostgreSQL instance. **Gitignored** (each developer keeps their own). Env vars fall back to local defaults (`localhost:5432/homeproject`, `postgres`/`postgres`) so `bootRun` works out of the box if a local Postgres is running with that database/user.
+- `application-local.yml` — for local development against a local PostgreSQL instance. **Gitignored** (each developer keeps their own). Env vars fall back to local defaults (`localhost:5432/homeproject`, `admin`/`1234`) so `bootRun` works out of the box if a local Postgres is running with that database/user. Local env vars are prefixed `HOMEPROJECT_` (`HOMEPROJECT_DB_HOST`, `HOMEPROJECT_DB_PORT`, `HOMEPROJECT_DB_NAME`, `HOMEPROJECT_DB_USERNAME`, `HOMEPROJECT_DB_PASSWORD`, `HOMEPROJECT_JWT_SECRET`) so generic `DB_*`/`JWT_SECRET` values exported for other projects don't silently redirect the app to another database.
 - `application-dev.yml` — deployed dev environment; `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD`, `JWT_SECRET` must be supplied, no defaults. `ddl-auto: update`.
 - `application-prod.yml` — same required env vars, but `ddl-auto: validate` (schema must be managed explicitly, e.g. via migrations, not auto-updated) and `show-sql: false`.
 
-When adding a new domain's persistence config or a new required setting, add it to `-dev.yml`/`-prod.yml` (no default) and to `-local.yml` (with a safe local default).
+When adding a new domain's persistence config or a new required setting, add it to `-dev.yml`/`-prod.yml` (no default) and to `-local.yml` (with a safe local default, using the `HOMEPROJECT_`-prefixed env var name).
 
 ## Commit convention
 
