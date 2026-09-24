@@ -1,0 +1,1 @@
+package org.miniproject.homeproject.domain.expense;
