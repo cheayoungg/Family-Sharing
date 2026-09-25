@@ -41,4 +41,8 @@ public class Expense extends BaseEntity {
 		this.paidStatus = paidStatus;
 		this.memo = memo;
 	}
+
+	public void pay() {
+		this.paidStatus = true;
+	}
 }
