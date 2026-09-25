@@ -50,4 +50,19 @@ public class Schedule extends BaseEntity {
 		this.assignee = assignee;
 		this.status = status;
 	}
+
+	public boolean isAssignedTo(Long userId) {
+		return assignee != null && assignee.getId().equals(userId);
+	}
+
+	public void update(String title, LocalDateTime startTime, LocalDateTime endTime, User assignee) {
+		this.title = title;
+		this.startTime = startTime;
+		this.endTime = endTime;
+		this.assignee = assignee;
+	}
+
+	public void complete() {
+		this.status = ScheduleStatus.DONE;
+	}
 }

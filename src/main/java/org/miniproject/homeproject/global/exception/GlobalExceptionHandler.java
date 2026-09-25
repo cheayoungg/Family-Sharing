@@ -9,8 +9,10 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +43,23 @@ public class GlobalExceptionHandler {
 	@ExceptionHandler(MethodArgumentTypeMismatchException.class)
 	public ResponseEntity<ApiResponse<Void>> handleTypeMismatchException(MethodArgumentTypeMismatchException e) {
 		return toResponse(ErrorCode.INVALID_INPUT, e.getName() + ": 올바르지 않은 형식입니다.");
+	}
+
+	// @RequestParam/@PathVariable에 붙은 @Min, @Max 같은 제약 위반
+	@ExceptionHandler(HandlerMethodValidationException.class)
+	public ResponseEntity<ApiResponse<Void>> handleMethodValidationException(HandlerMethodValidationException e) {
+		String message = e.getParameterValidationResults().stream()
+				.filter(result -> !result.getResolvableErrors().isEmpty())
+				.findFirst()
+				.map(result -> result.getMethodParameter().getParameterName() + ": "
+						+ result.getResolvableErrors().get(0).getDefaultMessage())
+				.orElse(ErrorCode.INVALID_INPUT.getMessage());
+		return toResponse(ErrorCode.INVALID_INPUT, message);
+	}
+
+	@ExceptionHandler(MissingServletRequestParameterException.class)
+	public ResponseEntity<ApiResponse<Void>> handleMissingParameterException(MissingServletRequestParameterException e) {
+		return toResponse(ErrorCode.INVALID_INPUT, e.getParameterName() + ": 필수 값입니다.");
 	}
 
 	@ExceptionHandler(DataIntegrityViolationException.class)
