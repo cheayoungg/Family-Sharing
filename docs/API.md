@@ -4,7 +4,7 @@
 
 ## 개요
 
-현재 구현된 API는 10개입니다: 인증 3개(`/api/auth/**`), 초대코드 1개(`/api/invite-code/**`), 일정 6개(`/api/schedules/**`). 기준 브랜치는 `feature/schedule`입니다.
+현재 구현된 API는 14개입니다: 인증 3개(`/api/auth/**`), 초대코드 1개(`/api/invite-code/**`), 일정 6개(`/api/schedules/**`), 가계부 4개(`/api/expenses/**`). 기준 브랜치는 `feature/expense`입니다.
 
 ### 인증
 
@@ -58,6 +58,7 @@
 | 404 | `INVITE_CODE_NOT_FOUND` | 초대코드를 찾을 수 없습니다. | id로 조회한 코드 없음 |
 | 404 | `USER_NOT_FOUND` | 사용자를 찾을 수 없습니다. | 없거나 탈퇴한 사용자를 담당자로 지정 |
 | 404 | `SCHEDULE_NOT_FOUND` | 일정을 찾을 수 없습니다. | 없거나 삭제된 일정 |
+| 404 | `EXPENSE_NOT_FOUND` | 지출 내역을 찾을 수 없습니다. | 없거나 삭제된 지출 내역 |
 | 409 | `DUPLICATE_EMAIL` | 이미 가입된 이메일입니다. | 이메일 중복 |
 | 409 | `OWNER_ALREADY_EXISTS` | 이미 가족장이 등록되어 있습니다. | 가족장 중복 가입 |
 | 409 | `INVITE_CODE_FULL` | 이미 정원이 찼습니다. | 초대코드 사용 한도 초과 |
@@ -403,18 +404,147 @@ Authorization: Bearer <accessToken>
 
 **Errors**: 401 · 403 `FORBIDDEN` (담당자가 아님) · 404 `SCHEDULE_NOT_FOUND`
 
-가계부(expense)·역할 분담(task)·공유사항(note)은 엔티티와 Repository만 있고 API는 아직 없습니다.
+## 가계부(Expense) API
+
+모든 가계부 API는 인증이 필요하고, 로그인한 사용자 누구나 등록·납부 처리·삭제할 수 있습니다. 지출 내역에는 등록자나 담당자 정보가 없어서 본인 여부는 검사하지 않습니다. 삭제된 지출 내역은 모든 API에서 없는 것으로 취급됩니다(404).
+
+| Method | URL | 설명 | 권한 | 성공 상태 |
+| --- | --- | --- | --- | --- |
+| GET | `/api/expenses?status=` | 지출 목록 (납부 상태 필터) | 로그인 | 200 |
+| POST | `/api/expenses` | 지출 등록 | 로그인 | 201 |
+| PATCH | `/api/expenses/{id}/pay` | 납부 처리 | 로그인 | 200 |
+| DELETE | `/api/expenses/{id}` | 삭제 (soft delete) | 로그인 | 200 |
+
+**지출 응답 객체** (`ExpenseResponse`)
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `id` | number | 지출 id |
+| `category` | string | 분류 (예: 관리비, 통신비) |
+| `amount` | number | 금액 (소수점 둘째 자리까지) |
+| `dueDate` | string | 납부 기한 (`yyyy-MM-dd`) |
+| `paidStatus` | boolean | 납부 여부 |
+| `memo` | string \| null | 메모 |
+
+```json
+{
+  "id": 1,
+  "category": "관리비",
+  "amount": 250000.00,
+  "dueDate": "2026-10-25",
+  "paidStatus": false,
+  "memo": "10월분"
+}
+```
+
+### GET /api/expenses — 목록 조회
+
+납부 기한이 빠른 순으로 돌려줍니다.
+
+**Query Parameter**
+
+| 이름 | 타입 | 필수 | 값 | 설명 |
+| --- | --- | --- | --- | --- |
+| `status` | string | X | `UNPAID` \| `PAID` | 빼면 전체 |
+
+```http
+GET /api/expenses?status=UNPAID
+Authorization: Bearer <accessToken>
+```
+
+**Response 200**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 2,
+      "category": "통신비",
+      "amount": 55000.00,
+      "dueDate": "2026-10-20",
+      "paidStatus": false,
+      "memo": null
+    },
+    {
+      "id": 1,
+      "category": "관리비",
+      "amount": 250000.00,
+      "dueDate": "2026-10-25",
+      "paidStatus": false,
+      "memo": "10월분"
+    }
+  ],
+  "error": null
+}
+```
+
+지출 내역이 없으면 `data` 는 빈 배열입니다.
+
+**Errors**: 400 `INVALID_INPUT` (`status` 가 `UNPAID`/`PAID` 가 아님) · 401
+
+### POST /api/expenses — 등록
+
+새 지출은 항상 미납(`paidStatus: false`) 상태로 만들어집니다.
+
+**Request Body**
+
+| 필드 | 타입 | 필수 | 제약 | 설명 |
+| --- | --- | --- | --- | --- |
+| `category` | string | O | 공백 불가, 최대 50자 | 분류 |
+| `amount` | number | O | 0보다 큼, 정수부 15자리·소수점 2자리 이하 | 금액 |
+| `dueDate` | string | O | `yyyy-MM-dd` | 납부 기한 |
+| `memo` | string | X | 최대 255자 | 메모 |
+
+```json
+{
+  "category": "관리비",
+  "amount": 250000,
+  "dueDate": "2026-10-25",
+  "memo": "10월분"
+}
+```
+
+**Response 201**: `data` 에 생성된 지출 응답 객체.
+
+**Errors**: 400 `INVALID_INPUT` · 401
+
+### PATCH /api/expenses/{id}/pay — 납부 처리
+
+`paidStatus` 를 `true` 로 바꿉니다. 요청 본문은 없습니다. 이미 납부된 내역은 그대로 성공합니다.
+
+**Response 200**: `data` 에 `paidStatus: true` 인 지출 응답 객체.
+
+**Errors**: 401 · 404 `EXPENSE_NOT_FOUND`
+
+### DELETE /api/expenses/{id} — 삭제
+
+데이터는 지우지 않고 `deletedAt` 만 채우며(soft delete), 이후 조회 목록에서 빠지고 납부 처리·삭제에서는 404가 납니다.
+
+**Response 200**
+
+```json
+{
+  "success": true,
+  "data": null,
+  "error": null
+}
+```
+
+**Errors**: 401 · 404 `EXPENSE_NOT_FOUND`
+
+역할 분담(task)·공유사항(note)은 엔티티와 Repository만 있고 API는 아직 없습니다.
 
 ## 데이터 모델
 
-모든 엔티티는 공통 필드 `id`, `createdAt`, `updatedAt`, `deletedAt`(soft delete)을 가집니다. `deletedAt` 이 채워진 사용자는 로그인할 수 없고 담당자로 지정할 수 없습니다. 초대코드와 일정은 없는 것으로 취급됩니다.
+모든 엔티티는 공통 필드 `id`, `createdAt`, `updatedAt`, `deletedAt`(soft delete)을 가집니다. `deletedAt` 이 채워진 사용자는 로그인할 수 없고 담당자로 지정할 수 없습니다. 초대코드·일정·지출 내역은 없는 것으로 취급됩니다.
 
 | 엔티티 (테이블) | 주요 필드 | API 여부 |
 | --- | --- | --- |
 | User (`users`) | `name`, `email`(unique), `password`(BCrypt), `role` | 인증 API에서 사용 |
 | InviteCode (`invite_codes`) | `code`(unique), `maxUses`, `usedCount`, `createdBy`→User | 있음 |
 | Schedule (`schedules`) | `title`, `startTime`, `endTime`, `assignee`→User, `status` | 있음 |
-| Expense (`expenses`) | `category`, `amount`(decimal), `dueDate`, `paidStatus`, `memo` | 없음 |
+| Expense (`expenses`) | `category`, `amount`(decimal), `dueDate`, `paidStatus`, `memo` | 있음 |
 | Task (`tasks`) | `title`, `assignee`→User, `recurring`, `status` | 없음 |
 | SharedNote (`shared_notes`) | `title`, `content`(text), `category`, `assignee`→User | 없음 |
 
