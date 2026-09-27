@@ -43,4 +43,12 @@ public class Task extends BaseEntity {
 		this.recurring = recurring;
 		this.status = status;
 	}
+
+	public boolean isAssignedTo(Long userId) {
+		return assignee != null && assignee.getId().equals(userId);
+	}
+
+	public void complete() {
+		this.status = TaskStatus.DONE;
+	}
 }

@@ -34,6 +34,9 @@ public enum ErrorCode {
 	// expense
 	EXPENSE_NOT_FOUND(HttpStatus.NOT_FOUND, "지출 내역을 찾을 수 없습니다."),
 
+	// task
+	TASK_NOT_FOUND(HttpStatus.NOT_FOUND, "할 일을 찾을 수 없습니다."),
+
 	// invite code
 	INVALID_INVITE_CODE(HttpStatus.NOT_FOUND, "유효하지 않은 초대코드입니다."),
 	INVITE_CODE_NOT_FOUND(HttpStatus.NOT_FOUND, "초대코드를 찾을 수 없습니다."),
