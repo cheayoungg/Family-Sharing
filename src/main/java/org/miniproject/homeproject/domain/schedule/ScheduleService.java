@@ -40,7 +40,6 @@ public class ScheduleService {
 
 	@Transactional
 	public ScheduleResponse create(ScheduleCreateRequest request) {
-		validateTimeRange(request.startTime(), request.endTime());
 		Schedule schedule = scheduleRepository.save(Schedule.builder()
 				.title(request.title())
 				.startTime(request.startTime())
@@ -56,10 +55,9 @@ public class ScheduleService {
 		Schedule schedule = findSchedule(scheduleId);
 		validateAssignee(schedule, requesterId);
 
-		// 한쪽 시간만 바꿔도 기존 나머지 시간과 비교해야 하므로 합친 값으로 검사한다
+		// 한쪽 시간만 바꿔도 기존 나머지 시간과 비교해야 하므로 합친 값을 넘긴다 (시간 검사는 Schedule.update에서)
 		LocalDateTime startTime = request.startTime() != null ? request.startTime() : schedule.getStartTime();
 		LocalDateTime endTime = request.endTime() != null ? request.endTime() : schedule.getEndTime();
-		validateTimeRange(startTime, endTime);
 
 		schedule.update(
 				request.title() != null ? request.title() : schedule.getTitle(),
@@ -92,12 +90,6 @@ public class ScheduleService {
 	private void validateAssignee(Schedule schedule, Long userId) {
 		if (!schedule.isAssignedTo(userId)) {
 			throw new BusinessException(ErrorCode.FORBIDDEN);
-		}
-	}
-
-	private void validateTimeRange(LocalDateTime startTime, LocalDateTime endTime) {
-		if (endTime.isBefore(startTime)) {
-			throw new BusinessException(ErrorCode.INVALID_SCHEDULE_TIME);
 		}
 	}
 

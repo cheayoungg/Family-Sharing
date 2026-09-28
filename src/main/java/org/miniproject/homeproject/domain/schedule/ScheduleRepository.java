@@ -15,13 +15,13 @@ public interface ScheduleRepository extends JpaRepository<Schedule, Long> {
 
 	/*
 	 * [from, to) 구간과 겹치는 일정. 월을 걸쳐 있는 일정(9/30~10/2)은 양쪽 달 모두에 나온다.
-	 * 시작과 끝이 같은 일정이 from 시각에 딱 놓이면 endTime > from 조건에 걸리지 않으므로 startTime >= from으로 보완한다
+	 * 종료 시각이 항상 시작 시각보다 뒤이므로(Schedule 참고) 두 조건만으로 겹침을 판단할 수 있다
 	 */
 	@Query("""
 			select s from Schedule s left join fetch s.assignee
 			where s.deletedAt is null
 			  and s.startTime < :to
-			  and (s.endTime > :from or s.startTime >= :from)
+			  and s.endTime > :from
 			order by s.startTime, s.id
 			""")
 	List<Schedule> findAllOverlapping(@Param("from") LocalDateTime from, @Param("to") LocalDateTime to);

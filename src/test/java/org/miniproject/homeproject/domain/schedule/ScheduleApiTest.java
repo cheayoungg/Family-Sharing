@@ -96,6 +96,15 @@ class ScheduleApiTest {
 	}
 
 	@Test
+	void 종료_시간이_시작_시간과_같으면_400() throws Exception {
+		perform(post("/api/schedules"), mom, """
+				{"title": "병원 예약", "startTime": "2026-10-02T10:00:00", "endTime": "2026-10-02T10:00:00", "assigneeId": %d}
+				""".formatted(mom.getId()))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("INVALID_SCHEDULE_TIME"));
+	}
+
+	@Test
 	void 없는_사용자를_담당자로_지정하면_404() throws Exception {
 		perform(post("/api/schedules"), mom, """
 				{"title": "병원 예약", "startTime": "2026-10-02T10:00:00", "endTime": "2026-10-02T11:00:00", "assigneeId": 999999}
@@ -108,7 +117,7 @@ class ScheduleApiTest {
 	void 월별_조회는_그_달에_걸친_일정만_시작_시간순으로_돌려준다() throws Exception {
 		saveSchedule("9월 일정", "2026-09-10T10:00", "2026-09-10T11:00", mom);
 		saveSchedule("9월말~10월초 여행", "2026-09-30T09:00", "2026-10-02T18:00", mom);
-		saveSchedule("10월 1일 0시 알림", "2026-10-01T00:00", "2026-10-01T00:00", dad);
+		saveSchedule("10월 1일 0시 시작", "2026-10-01T00:00", "2026-10-01T00:30", dad);
 		saveSchedule("10월 중순", "2026-10-15T10:00", "2026-10-15T11:00", dad);
 		saveSchedule("9월 30일 자정에 끝남", "2026-09-30T22:00", "2026-10-01T00:00", dad);
 		saveSchedule("11월 일정", "2026-11-01T00:00", "2026-11-01T01:00", mom);
@@ -118,7 +127,7 @@ class ScheduleApiTest {
 
 		perform(get("/api/schedules").param("year", "2026").param("month", "10"), mom, null)
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.data[*].title").value(contains("9월말~10월초 여행", "10월 1일 0시 알림", "10월 중순")));
+				.andExpect(jsonPath("$.data[*].title").value(contains("9월말~10월초 여행", "10월 1일 0시 시작", "10월 중순")));
 	}
 
 	@Test
@@ -178,6 +187,21 @@ class ScheduleApiTest {
 				""")
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.error.code").value("INVALID_SCHEDULE_TIME"));
+	}
+
+	@Test
+	void 수정해서_시작과_종료가_같아지면_400이고_기존_값은_그대로다() throws Exception {
+		Schedule schedule = saveSchedule("장보기", "2026-10-03T15:00", "2026-10-03T16:00", dad);
+
+		perform(patch("/api/schedules/{id}", schedule.getId()), dad, """
+				{"title": "마트 장보기", "endTime": "2026-10-03T15:00:00"}
+				""")
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.error.code").value("INVALID_SCHEDULE_TIME"));
+
+		Schedule saved = scheduleRepository.findById(schedule.getId()).orElseThrow();
+		assertThat(saved.getTitle()).isEqualTo("장보기");
+		assertThat(saved.getEndTime()).isEqualTo(LocalDateTime.parse("2026-10-03T16:00"));
 	}
 
 	@Test
