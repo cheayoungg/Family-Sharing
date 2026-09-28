@@ -4,7 +4,7 @@
 
 ## 개요
 
-현재 구현된 API는 14개입니다: 인증 3개(`/api/auth/**`), 초대코드 1개(`/api/invite-code/**`), 일정 6개(`/api/schedules/**`), 가계부 4개(`/api/expenses/**`). 기준 브랜치는 `feature/expense`입니다.
+현재 구현된 API는 18개입니다: 인증 3개(`/api/auth/**`), 초대코드 1개(`/api/invite-code/**`), 일정 6개(`/api/schedules/**`), 가계부 4개(`/api/expenses/**`), 할 일 4개(`/api/tasks/**`). 기준 브랜치는 `feature/task`입니다.
 
 ### 인증
 
@@ -59,6 +59,7 @@
 | 404 | `USER_NOT_FOUND` | 사용자를 찾을 수 없습니다. | 없거나 탈퇴한 사용자를 담당자로 지정 |
 | 404 | `SCHEDULE_NOT_FOUND` | 일정을 찾을 수 없습니다. | 없거나 삭제된 일정 |
 | 404 | `EXPENSE_NOT_FOUND` | 지출 내역을 찾을 수 없습니다. | 없거나 삭제된 지출 내역 |
+| 404 | `TASK_NOT_FOUND` | 할 일을 찾을 수 없습니다. | 없거나 삭제된 할 일 |
 | 409 | `DUPLICATE_EMAIL` | 이미 가입된 이메일입니다. | 이메일 중복 |
 | 409 | `OWNER_ALREADY_EXISTS` | 이미 가족장이 등록되어 있습니다. | 가족장 중복 가입 |
 | 409 | `INVITE_CODE_FULL` | 이미 정원이 찼습니다. | 초대코드 사용 한도 초과 |
@@ -533,11 +534,125 @@ Authorization: Bearer <accessToken>
 
 **Errors**: 401 · 404 `EXPENSE_NOT_FOUND`
 
-역할 분담(task)·공유사항(note)은 엔티티와 Repository만 있고 API는 아직 없습니다.
+## 할 일(Task) API
+
+집안일 같은 역할 분담을 관리합니다. 모든 할 일 API는 인증이 필요합니다. 삭제는 담당자(`assignee`) 본인만 할 수 있고, 조회·등록·완료 체크는 로그인한 사용자 누구나 할 수 있습니다. 삭제된 할 일은 모든 API에서 없는 것으로 취급됩니다(404).
+
+| Method | URL | 설명 | 권한 | 성공 상태 |
+| --- | --- | --- | --- | --- |
+| GET | `/api/tasks?assigneeId=` | 할 일 목록 (담당자 필터) | 로그인 | 200 |
+| POST | `/api/tasks` | 할 일 등록 | 로그인 | 201 |
+| PATCH | `/api/tasks/{id}/complete` | 완료 체크 | 로그인 | 200 |
+| DELETE | `/api/tasks/{id}` | 삭제 (soft delete) | 담당자 본인 | 200 |
+
+**할 일 응답 객체** (`TaskResponse`)
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `id` | number | 할 일 id |
+| `title` | string | 제목 |
+| `assignee` | object | 담당자 `{ id, name }` |
+| `isRecurring` | boolean | 반복 여부 (현재는 저장만 하고, 완료 후 자동으로 다시 `TODO` 가 되지는 않음) |
+| `status` | string | `TODO` / `DONE` |
+
+```json
+{
+  "id": 1,
+  "title": "분리수거",
+  "assignee": { "id": 7, "name": "홍길순" },
+  "isRecurring": true,
+  "status": "TODO"
+}
+```
+
+### GET /api/tasks — 목록 조회
+
+등록 순으로 돌려줍니다.
+
+**Query Parameter**
+
+| 이름 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `assigneeId` | number | X | 담당자 id. 빼면 전체, 없는 사용자 id면 빈 배열 |
+
+```http
+GET /api/tasks?assigneeId=7
+Authorization: Bearer <accessToken>
+```
+
+**Response 200**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "title": "분리수거",
+      "assignee": { "id": 7, "name": "홍길순" },
+      "isRecurring": true,
+      "status": "TODO"
+    }
+  ],
+  "error": null
+}
+```
+
+**Errors**: 400 `INVALID_INPUT` (`assigneeId` 가 숫자가 아님) · 401
+
+### POST /api/tasks — 등록
+
+새 할 일은 항상 `TODO` 상태로 만들어집니다.
+
+**Request Body**
+
+| 필드 | 타입 | 필수 | 제약 | 설명 |
+| --- | --- | --- | --- | --- |
+| `title` | string | O | 공백 불가, 최대 100자 | 제목 |
+| `assigneeId` | number | O | 존재하는 사용자 id | 담당자 |
+| `isRecurring` | boolean | O | | 반복 여부 |
+
+```json
+{
+  "title": "분리수거",
+  "assigneeId": 7,
+  "isRecurring": true
+}
+```
+
+**Response 201**: `data` 에 생성된 할 일 응답 객체.
+
+**Errors**: 400 `INVALID_INPUT` · 401 · 404 `USER_NOT_FOUND`
+
+### PATCH /api/tasks/{id}/complete — 완료 체크
+
+상태를 `DONE` 으로 바꿉니다. 요청 본문은 없습니다. 이미 `DONE` 인 할 일은 그대로 성공합니다.
+
+**Response 200**: `data` 에 `status: "DONE"` 인 할 일 응답 객체.
+
+**Errors**: 401 · 404 `TASK_NOT_FOUND`
+
+### DELETE /api/tasks/{id} — 삭제
+
+담당자 본인만 삭제할 수 있습니다. 데이터는 지우지 않고 `deletedAt` 만 채우며(soft delete), 이후 목록에서 빠지고 완료 체크·삭제에서는 404가 납니다.
+
+**Response 200**
+
+```json
+{
+  "success": true,
+  "data": null,
+  "error": null
+}
+```
+
+**Errors**: 401 · 403 `FORBIDDEN` (담당자가 아님) · 404 `TASK_NOT_FOUND`
+
+공유사항(note)은 엔티티와 Repository만 있고 API는 아직 없습니다.
 
 ## 데이터 모델
 
-모든 엔티티는 공통 필드 `id`, `createdAt`, `updatedAt`, `deletedAt`(soft delete)을 가집니다. `deletedAt` 이 채워진 사용자는 로그인할 수 없고 담당자로 지정할 수 없습니다. 초대코드·일정·지출 내역은 없는 것으로 취급됩니다.
+모든 엔티티는 공통 필드 `id`, `createdAt`, `updatedAt`, `deletedAt`(soft delete)을 가집니다. `deletedAt` 이 채워진 사용자는 로그인할 수 없고 담당자로 지정할 수 없습니다. 초대코드·일정·지출 내역·할 일은 없는 것으로 취급됩니다.
 
 | 엔티티 (테이블) | 주요 필드 | API 여부 |
 | --- | --- | --- |
@@ -545,7 +660,7 @@ Authorization: Bearer <accessToken>
 | InviteCode (`invite_codes`) | `code`(unique), `maxUses`, `usedCount`, `createdBy`→User | 있음 |
 | Schedule (`schedules`) | `title`, `startTime`, `endTime`, `assignee`→User, `status` | 있음 |
 | Expense (`expenses`) | `category`, `amount`(decimal), `dueDate`, `paidStatus`, `memo` | 있음 |
-| Task (`tasks`) | `title`, `assignee`→User, `recurring`, `status` | 없음 |
+| Task (`tasks`) | `title`, `assignee`→User, `recurring`, `status` | 있음 |
 | SharedNote (`shared_notes`) | `title`, `content`(text), `category`, `assignee`→User | 없음 |
 
 ### Enum
