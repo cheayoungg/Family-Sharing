@@ -48,7 +48,7 @@
 | HTTP | code | message | 발생 상황 |
 | --- | --- | --- | --- |
 | 400 | `INVALID_INPUT` | 잘못된 입력입니다. | 검증 실패, JSON 파싱 실패, 경로 변수 타입 불일치, 쿼리 파라미터 누락·범위 초과 |
-| 400 | `INVALID_SCHEDULE_TIME` | 종료 시간은 시작 시간보다 빠를 수 없습니다. | 일정 종료 시각이 시작 시각보다 빠름 |
+| 400 | `INVALID_SCHEDULE_TIME` | 종료 시간은 시작 시간보다 늦어야 합니다. | 일정 종료 시각이 시작 시각과 같거나 빠름 |
 | 401 | `UNAUTHORIZED` | 인증이 필요합니다. | 토큰 없이 보호된 API 호출 |
 | 401 | `INVALID_TOKEN` | 유효하지 않은 토큰입니다. | 서명 오류·형식 오류 토큰 |
 | 401 | `EXPIRED_TOKEN` | 만료된 토큰입니다. | 만료된 토큰 |
@@ -341,7 +341,7 @@ Authorization: Bearer <accessToken>
 | --- | --- | --- | --- | --- |
 | `title` | string | O | 공백 불가, 최대 100자 | 제목 |
 | `startTime` | string | O | `yyyy-MM-ddTHH:mm:ss` | 시작 시각 |
-| `endTime` | string | O | `startTime` 이상 | 종료 시각 |
+| `endTime` | string | O | `startTime` 보다 뒤 (같으면 안 됨) | 종료 시각 |
 | `assigneeId` | number | O | 존재하는 사용자 id | 담당자 |
 
 ```json
@@ -370,7 +370,7 @@ Authorization: Bearer <accessToken>
 | `endTime` | string | `yyyy-MM-ddTHH:mm:ss` | 종료 시각 |
 | `assigneeId` | number | 존재하는 사용자 id | 새 담당자 |
 
-시작·종료 시각은 하나만 보내도 기존 값과 합쳐서 검사합니다. 예를 들어 `startTime` 만 기존 `endTime` 보다 늦게 보내면 `INVALID_SCHEDULE_TIME` 입니다.
+시작·종료 시각은 하나만 보내도 기존 값과 합쳐서 검사합니다. 예를 들어 `startTime` 만 기존 `endTime` 과 같거나 늦게 보내면 `INVALID_SCHEDULE_TIME` 입니다.
 
 ```json
 {
