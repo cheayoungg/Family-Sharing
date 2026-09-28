@@ -4,7 +4,7 @@
 
 ## 개요
 
-현재 구현된 API는 18개입니다: 인증 3개(`/api/auth/**`), 초대코드 1개(`/api/invite-code/**`), 일정 6개(`/api/schedules/**`), 가계부 4개(`/api/expenses/**`), 할 일 4개(`/api/tasks/**`). 기준 브랜치는 `feature/task`입니다.
+현재 구현된 API는 21개입니다: 인증 3개(`/api/auth/**`), 초대코드 1개(`/api/invite-code/**`), 일정 6개(`/api/schedules/**`), 가계부 4개(`/api/expenses/**`), 할 일 4개(`/api/tasks/**`), 공유사항 3개(`/api/notes/**`). 기준 브랜치는 `feature/note`입니다.
 
 ### 인증
 
@@ -60,6 +60,7 @@
 | 404 | `SCHEDULE_NOT_FOUND` | 일정을 찾을 수 없습니다. | 없거나 삭제된 일정 |
 | 404 | `EXPENSE_NOT_FOUND` | 지출 내역을 찾을 수 없습니다. | 없거나 삭제된 지출 내역 |
 | 404 | `TASK_NOT_FOUND` | 할 일을 찾을 수 없습니다. | 없거나 삭제된 할 일 |
+| 404 | `NOTE_NOT_FOUND` | 공유사항을 찾을 수 없습니다. | 없거나 삭제된 공유사항 |
 | 409 | `DUPLICATE_EMAIL` | 이미 가입된 이메일입니다. | 이메일 중복 |
 | 409 | `OWNER_ALREADY_EXISTS` | 이미 가족장이 등록되어 있습니다. | 가족장 중복 가입 |
 | 409 | `INVITE_CODE_FULL` | 이미 정원이 찼습니다. | 초대코드 사용 한도 초과 |
@@ -648,11 +649,125 @@ Authorization: Bearer <accessToken>
 
 **Errors**: 401 · 403 `FORBIDDEN` (담당자가 아님) · 404 `TASK_NOT_FOUND`
 
-공유사항(note)은 엔티티와 Repository만 있고 API는 아직 없습니다.
+## 공유사항(SharedNote) API
+
+"문앞에 택배 받아줘" 같은 가족 게시판 글을 관리합니다. 모든 공유사항 API는 인증이 필요하고, 로그인한 사용자 누구나 등록·삭제할 수 있습니다. 등록할 때 담당자나 작성자를 받지 않아서 본인 여부는 검사하지 않습니다. 삭제된 공유사항은 모든 API에서 없는 것으로 취급됩니다(404).
+
+| Method | URL | 설명 | 권한 | 성공 상태 |
+| --- | --- | --- | --- | --- |
+| GET | `/api/notes?category=` | 공유사항 목록 (카테고리 필터) | 로그인 | 200 |
+| POST | `/api/notes` | 공유사항 등록 | 로그인 | 201 |
+| DELETE | `/api/notes/{id}` | 삭제 (soft delete) | 로그인 | 200 |
+
+**공유사항 응답 객체** (`SharedNoteResponse`)
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `id` | number | 공유사항 id |
+| `title` | string | 제목 |
+| `content` | string | 내용 |
+| `category` | string | 카테고리 (자유 문자열) |
+| `assignee` | object / null | 담당자 `{ id, name }`. 등록 API로는 지정할 수 없어 현재는 항상 `null` |
+| `createdAt` | string | 작성 시각 (ISO-8601, 시간대 없음, 소수 초 자릿수는 값에 따라 달라짐) |
+
+```json
+{
+  "id": 1,
+  "title": "택배",
+  "content": "문앞에 택배 받아줘~",
+  "category": "부탁",
+  "assignee": null,
+  "createdAt": "2026-09-28T09:15:30.123456"
+}
+```
+
+### GET /api/notes — 목록 조회
+
+최신 글이 위로 오도록(`createdAt` 내림차순) 돌려줍니다.
+
+**Query Parameter**
+
+| 이름 | 타입 | 필수 | 설명 |
+| --- | --- | --- | --- |
+| `category` | string | X | 카테고리. 빼면 전체, 정확히 일치하는 것만 조회 (앞뒤 공백도 구분) |
+
+```http
+GET /api/notes?category=부탁
+Authorization: Bearer <accessToken>
+```
+
+**Response 200**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 3,
+      "title": "우유 사 와",
+      "content": "퇴근길에 우유 하나만",
+      "category": "부탁",
+      "assignee": null,
+      "createdAt": "2026-09-28T18:02:11.482913"
+    },
+    {
+      "id": 1,
+      "title": "택배",
+      "content": "문앞에 택배 받아줘~",
+      "category": "부탁",
+      "assignee": null,
+      "createdAt": "2026-09-28T09:15:30.123456"
+    }
+  ],
+  "error": null
+}
+```
+
+해당 카테고리가 없거나 공유사항이 없으면 `data` 는 빈 배열입니다.
+
+**Errors**: 401
+
+### POST /api/notes — 등록
+
+**Request Body**
+
+| 필드 | 타입 | 필수 | 제약 | 설명 |
+| --- | --- | --- | --- | --- |
+| `title` | string | O | 공백 불가, 최대 100자 | 제목 |
+| `content` | string | O | 공백 불가, 최대 5,000자 | 내용 |
+| `category` | string | O | 공백 불가, 최대 50자 | 카테고리 |
+
+```json
+{
+  "title": "택배",
+  "content": "문앞에 택배 받아줘~",
+  "category": "부탁"
+}
+```
+
+**Response 201**: `data` 에 생성된 공유사항 응답 객체.
+
+**Errors**: 400 `INVALID_INPUT` · 401
+
+### DELETE /api/notes/{id} — 삭제
+
+데이터는 지우지 않고 `deletedAt` 만 채우며(soft delete), 이후 목록에서 빠지고 다시 삭제하면 404가 납니다.
+
+**Response 200**
+
+```json
+{
+  "success": true,
+  "data": null,
+  "error": null
+}
+```
+
+**Errors**: 401 · 404 `NOTE_NOT_FOUND`
 
 ## 데이터 모델
 
-모든 엔티티는 공통 필드 `id`, `createdAt`, `updatedAt`, `deletedAt`(soft delete)을 가집니다. `deletedAt` 이 채워진 사용자는 로그인할 수 없고 담당자로 지정할 수 없습니다. 초대코드·일정·지출 내역·할 일은 없는 것으로 취급됩니다.
+모든 엔티티는 공통 필드 `id`, `createdAt`, `updatedAt`, `deletedAt`(soft delete)을 가집니다. `deletedAt` 이 채워진 사용자는 로그인할 수 없고 담당자로 지정할 수 없습니다. 초대코드·일정·지출 내역·할 일·공유사항은 없는 것으로 취급됩니다.
 
 | 엔티티 (테이블) | 주요 필드 | API 여부 |
 | --- | --- | --- |
@@ -661,7 +776,7 @@ Authorization: Bearer <accessToken>
 | Schedule (`schedules`) | `title`, `startTime`, `endTime`, `assignee`→User, `status` | 있음 |
 | Expense (`expenses`) | `category`, `amount`(decimal), `dueDate`, `paidStatus`, `memo` | 있음 |
 | Task (`tasks`) | `title`, `assignee`→User, `recurring`, `status` | 있음 |
-| SharedNote (`shared_notes`) | `title`, `content`(text), `category`, `assignee`→User | 없음 |
+| SharedNote (`shared_notes`) | `title`, `content`(text), `category`, `assignee`→User | 있음 |
 
 ### Enum
 
