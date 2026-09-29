@@ -4,7 +4,7 @@
 
 ## 개요
 
-현재 구현된 API는 21개입니다: 인증 3개(`/api/auth/**`), 초대코드 1개(`/api/invite-code/**`), 일정 6개(`/api/schedules/**`), 가계부 4개(`/api/expenses/**`), 할 일 4개(`/api/tasks/**`), 공유사항 3개(`/api/notes/**`). 기준 브랜치는 `feature/note`입니다.
+현재 구현된 API는 22개입니다: 인증 3개(`/api/auth/**`), 초대코드 1개(`/api/invite-code/**`), 일정 6개(`/api/schedules/**`), 가계부 4개(`/api/expenses/**`), 할 일 4개(`/api/tasks/**`), 공유사항 3개(`/api/notes/**`), 대시보드 1개(`/api/dashboard`). 기준 브랜치는 `feature/dashboard`입니다.
 
 ### 인증
 
@@ -764,6 +764,75 @@ Authorization: Bearer <accessToken>
 ```
 
 **Errors**: 401 · 404 `NOTE_NOT_FOUND`
+
+## 대시보드(Dashboard) API
+
+홈 화면에 보여줄 오늘 일정, 미완료 할 일, 미납 지출을 한 번에 돌려줍니다. 인증이 필요하고, 로그인한 사용자 누구나 조회할 수 있습니다. 별도 데이터를 저장하지 않고 일정·할 일·가계부 조회 결과를 모아서 보여줍니다.
+
+| Method | URL | 설명 | 권한 | 성공 상태 |
+| --- | --- | --- | --- | --- |
+| GET | `/api/dashboard` | 오늘 기준 대시보드 | 로그인 | 200 |
+
+### GET /api/dashboard — 대시보드 조회
+
+"오늘"은 서버 시간대와 관계없이 **한국 시간(Asia/Seoul)** 기준입니다. 요청 파라미터는 없습니다.
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `date` | string | 기준 날짜 (`yyyy-MM-dd`, 한국 시간 오늘) |
+| `todaySchedules` | array | 오늘에 조금이라도 걸친 일정. 전날 밤에 시작해 오늘 끝나는 일정도 포함하고, 완료·취소된 일정도 나옵니다. 시작 시각 순. 항목은 [일정 응답 객체](#일정schedule-api) |
+| `incompleteTasks` | array | 상태가 `TODO` 인 할 일 전체. 등록 순. 항목은 [할 일 응답 객체](#할-일task-api) |
+| `unpaidExpenses` | array | 미납 지출 전체 (기한이 지난 것과 남은 것 모두). 납부 기한 순. 항목은 [지출 응답 객체](#가계부expense-api) |
+
+```http
+GET /api/dashboard
+Authorization: Bearer <accessToken>
+```
+
+**Response 200**
+
+```json
+{
+  "success": true,
+  "data": {
+    "date": "2026-10-02",
+    "todaySchedules": [
+      {
+        "id": 3,
+        "title": "병원 예약",
+        "startTime": "2026-10-02T10:00:00",
+        "endTime": "2026-10-02T11:00:00",
+        "assignee": { "id": 6, "name": "홍길동" },
+        "status": "PLANNED"
+      }
+    ],
+    "incompleteTasks": [
+      {
+        "id": 1,
+        "title": "분리수거",
+        "assignee": { "id": 7, "name": "홍길순" },
+        "isRecurring": true,
+        "status": "TODO"
+      }
+    ],
+    "unpaidExpenses": [
+      {
+        "id": 2,
+        "category": "통신비",
+        "amount": 55000.00,
+        "dueDate": "2026-09-25",
+        "paidStatus": false,
+        "memo": null
+      }
+    ]
+  },
+  "error": null
+}
+```
+
+해당하는 항목이 없으면 각 목록은 빈 배열입니다.
+
+**Errors**: 401
 
 ## 데이터 모델
 
