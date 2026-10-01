@@ -28,7 +28,7 @@ public enum ErrorCode {
 
 	// schedule
 	SCHEDULE_NOT_FOUND(HttpStatus.NOT_FOUND, "일정을 찾을 수 없습니다."),
-	INVALID_SCHEDULE_TIME(HttpStatus.BAD_REQUEST, "종료 시간은 시작 시간보다 빠를 수 없습니다."),
+	INVALID_SCHEDULE_TIME(HttpStatus.BAD_REQUEST, "종료 시간은 시작 시간보다 늦어야 합니다."),
 	SCHEDULE_CANCELED(HttpStatus.CONFLICT, "취소된 일정은 완료 처리할 수 없습니다."),
 
 	// expense
