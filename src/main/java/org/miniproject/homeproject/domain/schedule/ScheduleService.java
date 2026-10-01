@@ -1,5 +1,6 @@
 package org.miniproject.homeproject.domain.schedule;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.List;
@@ -26,11 +27,16 @@ public class ScheduleService {
 	@Transactional(readOnly = true)
 	public List<ScheduleResponse> getMonthlySchedules(int year, int month) {
 		YearMonth yearMonth = YearMonth.of(year, month);
-		LocalDateTime from = yearMonth.atDay(1).atStartOfDay();
-		LocalDateTime to = yearMonth.plusMonths(1).atDay(1).atStartOfDay();
-		return scheduleRepository.findAllOverlapping(from, to).stream()
-				.map(ScheduleResponse::from)
-				.toList();
+		return getOverlappingSchedules(yearMonth.atDay(1).atStartOfDay(),
+				yearMonth.plusMonths(1).atDay(1).atStartOfDay());
+	}
+
+	/**
+	 * 해당 날짜에 조금이라도 걸친 일정. 전날 밤에 시작해 이날 새벽에 끝나는 일정도 포함한다.
+	 */
+	@Transactional(readOnly = true)
+	public List<ScheduleResponse> getDailySchedules(LocalDate date) {
+		return getOverlappingSchedules(date.atStartOfDay(), date.plusDays(1).atStartOfDay());
 	}
 
 	@Transactional(readOnly = true)
@@ -91,6 +97,12 @@ public class ScheduleService {
 		if (!schedule.isAssignedTo(userId)) {
 			throw new BusinessException(ErrorCode.FORBIDDEN);
 		}
+	}
+
+	private List<ScheduleResponse> getOverlappingSchedules(LocalDateTime from, LocalDateTime to) {
+		return scheduleRepository.findAllOverlapping(from, to).stream()
+				.map(ScheduleResponse::from)
+				.toList();
 	}
 
 	private Schedule findSchedule(Long scheduleId) {
