@@ -14,3 +14,10 @@ jwt:
 
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS} # 쉼표로 구분, 예) https://family.example.com
+
+# 운영에서는 API 구조를 외부에 공개하지 않도록 Swagger UI와 스펙을 끈다
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false

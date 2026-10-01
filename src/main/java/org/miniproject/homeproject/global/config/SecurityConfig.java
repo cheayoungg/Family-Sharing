@@ -41,6 +41,8 @@ public class SecurityConfig {
 				.authorizeHttpRequests(auth -> auth
 						// /error를 막으면 404/500 같은 오류 응답까지 401로 바뀐다
 						.requestMatchers("/api/auth/**", "/error").permitAll()
+						// Swagger UI와 API 스펙. prod에서는 springdoc 설정으로 아예 꺼서 이 경로가 404가 된다
+						.requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
 						.anyRequest().authenticated())
 				.exceptionHandling(exception -> exception
 						.authenticationEntryPoint(authenticationEntryPoint)
