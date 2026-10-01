@@ -17,9 +17,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 
+@Tag(name = "가계부")
 @RestController
 @RequestMapping("/api/expenses")
 @RequiredArgsConstructor
@@ -27,22 +30,26 @@ public class ExpenseController {
 
 	private final ExpenseService expenseService;
 
+	@Operation(summary = "지출 목록 (납부 상태 필터, 없으면 전체)")
 	@GetMapping
 	public ResponseEntity<ApiResponse<List<ExpenseResponse>>> getExpenses(
 			@RequestParam(required = false) ExpensePaymentStatus status) {
 		return ResponseEntity.ok(ApiResponse.success(expenseService.getExpenses(status)));
 	}
 
+	@Operation(summary = "지출 등록")
 	@PostMapping
 	public ResponseEntity<ApiResponse<ExpenseResponse>> create(@Valid @RequestBody ExpenseCreateRequest request) {
 		return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(expenseService.create(request)));
 	}
 
+	@Operation(summary = "납부 처리")
 	@PatchMapping("/{id}/pay")
 	public ResponseEntity<ApiResponse<ExpenseResponse>> pay(@PathVariable Long id) {
 		return ResponseEntity.ok(ApiResponse.success(expenseService.pay(id)));
 	}
 
+	@Operation(summary = "지출 삭제")
 	@DeleteMapping("/{id}")
 	public ResponseEntity<ApiResponse<Void>> delete(@PathVariable Long id) {
 		expenseService.delete(id);
