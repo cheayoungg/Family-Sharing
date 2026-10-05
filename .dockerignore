@@ -1,19 +1,30 @@
-# 빌드 결과물·IDE 파일 (이미지 안에서 새로 빌드한다)
+# 빌드 결과물·캐시 (이미지 안에서 새로 빌드한다)
 .gradle
 build
 out
 bin
+
+# IDE·OS·도구 파일
 .idea
 *.iml
 .vscode
+.claude
+.DS_Store
+*.log
 
 # 비밀값·개인 설정은 이미지에 넣지 않는다. 실행할 때 환경변수로 주입한다
 .env
 .env.*
 src/main/resources/application-local.yml
 
-# 이미지에 필요 없는 문서
+# 이미지 빌드(bootJar -x test)에 쓰이지 않는 것. 바뀌어도 빌드 캐시가 깨지지 않게 뺀다
+src/test
+Dockerfile
+.dockerignore
+docker-compose.yml
 .git
+.gitignore
+.gitattributes
 blog
 docs
 *.md

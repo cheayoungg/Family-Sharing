@@ -161,6 +161,7 @@ docker compose down
 - **run stage** (`eclipse-temurin:17-jre`): JRE와 실행 파일만 담고, root가 아닌 `app` 사용자로 실행합니다.
 - 기본 프로필은 `prod`입니다. dev 서버는 `SPRING_PROFILES_ACTIVE=dev`로 덮어씁니다.
 - JVM 시간대를 `Asia/Seoul`로 고정했습니다. `createdAt` 같은 기록 시각도 일정 시각과 같은 한국 시간으로 저장됩니다.
+- heap 상한은 컨테이너 메모리 제한의 50%입니다(`JAVA_TOOL_OPTIONS`로 변경 가능, [배포 5단계](#5-실행) 참고). GC는 작은 heap에 맞는 Serial GC로 고정했고, OutOfMemoryError가 나면 프로세스를 종료해 `--restart` 정책으로 다시 뜨게 합니다.
 - 테스트는 이미지 빌드 안에서 돌리지 않습니다. Testcontainers가 Docker를 필요로 하기 때문입니다. 배포 전에 `./gradlew test`로 따로 돌립니다.
 
 ## 배포하기
@@ -247,11 +248,21 @@ diff v1-schema.sql prod-schema.sql   # 주석·SET 줄 외의 차이가 없어�
 ```bash
 docker pull <레지스트리>/homeproject:$TAG
 docker run -d --name homeproject --restart unless-stopped \
+  --memory=768m \
   -p 8080:8080 --env-file .env \
   <레지스트리>/homeproject:$TAG
 
 docker logs -f homeproject   # "Started HomeProjectApplication" 확인
 ```
+
+`--memory`는 꼭 붙입니다. JVM은 heap 상한을 컨테이너 메모리 제한의 비율(기본 50%)로 잡는데, 제한이 없으면 서버 전체 메모리를 기준으로 잡아 OS와 다른 프로세스가 쓸 메모리까지 넘봅니다.
+
+| 서버 메모리 | `--memory` | heap 비율 |
+| --- | --- | --- |
+| 1GB | `768m` | 기본값(50%, heap 384MB) 그대로 |
+| 2GB | `1536m` | `-e JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75`로 올려도 됨 (heap 1152MB) |
+
+heap 밖(metaspace, code cache 등)에서 약 300MB를 서버 크기와 관계없이 고정으로 쓰기 때문에, 1GB 서버에서 75%로 올리면 컨테이너가 메모리 제한에 걸려 강제 종료(OOMKilled)될 수 있습니다. PostgreSQL도 같은 서버에 띄운다면 그 메모리도 남겨야 하므로 2GB 이상 서버를 권장합니다.
 
 DB가 같은 서버의 Docker 컨테이너라면 [Docker로 실행하기](#docker로-실행하기)처럼 같은 네트워크(`--network`)에 붙이고, `DB_URL`의 호스트에 DB 컨테이너 이름을 씁니다.
 
@@ -264,7 +275,7 @@ HTTPS는 앱 앞에 Nginx 같은 리버스 프록시나 클라우드 로드밸�
 ```bash
 docker pull <레지스트리>/homeproject:$NEW_TAG
 docker rm -f homeproject
-docker run -d --name homeproject --restart unless-stopped -p 8080:8080 --env-file .env <레지스트리>/homeproject:$NEW_TAG
+docker run -d --name homeproject --restart unless-stopped --memory=768m -p 8080:8080 --env-file .env <레지스트리>/homeproject:$NEW_TAG
 ```
 
 ### 시작이 안 될 때
