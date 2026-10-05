@@ -5,7 +5,7 @@
 | `backup.sh` | db 컨테이너에서 `pg_dump` → gzip → `backups/<DB>-YYYYmmdd-HHMMSS.sql.gz`. 성공하면 7일 이상 지난 백업 삭제. 버킷을 설정하면 S3에도 업로드 |
 | `restore.sh <파일>` | 백업 파일로 DB를 통째로 되돌림. 복구 직전 상태를 먼저 따로 덤프 |
 
-모두 서버의 배포 폴더(`~/family-app`)에서 실행합니다. `-h`로 사용법을 볼 수 있습니다.
+모두 서버의 배포 폴더(`/opt/family-app`)에서 실행합니다. `-h`로 사용법을 볼 수 있습니다.
 
 **백업 대상은 PostgreSQL 데이터뿐입니다.** 나머지는 이렇게 다룹니다.
 
@@ -28,7 +28,7 @@
 ### 직접 실행
 
 ```bash
-cd ~/family-app
+cd /opt/family-app
 ./backup.sh
 # [2026-10-05 03:00:00] 백업 시작: familyapp → ./backups/familyapp-20261005-030000.sql.gz
 # [2026-10-05 03:00:01] 백업 완료: ./backups/familyapp-20261005-030000.sql.gz (4.0K)
@@ -62,17 +62,17 @@ crontab -e
 PATH=/usr/local/bin:/usr/bin:/bin
 
 # 매일 03:00 DB 백업
-0 3 * * * cd /home/ubuntu/family-app && ./backup.sh >> backups/backup.log 2>&1
+0 3 * * * cd /opt/family-app && ./backup.sh >> backups/backup.log 2>&1
 ```
 
-- 경로(`/home/ubuntu/family-app`)는 실제 배포 폴더로 바꿉니다. `which docker`, `which aws`로 위치를 확인해 PATH에 들어 있는지 봅니다.
+- 경로(`/opt/family-app`)는 실제 배포 폴더로 바꿉니다. `which docker`, `which aws`로 위치를 확인해 PATH에 들어 있는지 봅니다.
 - PATH가 빠지면 로그에 `docker를 찾을 수 없습니다 (PATH=/usr/bin:/bin)`가 남습니다.
 
 **3. 다음 날 확인합니다.**
 
 ```bash
-tail -5 ~/family-app/backups/backup.log
-ls -lt ~/family-app/backups | head
+tail -5 /opt/family-app/backups/backup.log
+ls -lt /opt/family-app/backups | head
 ```
 
 `backup.log`는 하루 몇 줄씩만 늘어납니다. 너무 커지면 지우거나 logrotate에 등록합니다.
@@ -117,7 +117,7 @@ ls -lt ~/family-app/backups | head
 ### A. 같은 서버에서 특정 시점으로 되돌리기
 
 ```bash
-cd ~/family-app
+cd /opt/family-app
 ls -lt backups/*.sql.gz | head          # 되돌릴 시점 고르기
 
 ./restore.sh backups/familyapp-20261005-030000.sql.gz

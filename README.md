@@ -177,6 +177,7 @@ docker compose down
 - 외부에 열리는 포트는 nginx의 80, 443입니다. app과 db는 포트를 열지 않고 Docker 네트워크 안에서만 통신합니다.
 - HTTPS 인증서의 최초 발급과 자동 갱신은 [`deploy/HTTPS.md`](deploy/HTTPS.md)에 있습니다.
 - DB 백업(매일 cron, 선택적 S3 업로드)과 복구 절차는 [`deploy/BACKUP.md`](deploy/BACKUP.md)에 있습니다.
+- EC2를 처음부터 세팅해 배포·롤백·장애 대응까지 따라 하는 런북은 [`deploy/DEPLOY.md`](deploy/DEPLOY.md)입니다.
 - `backend` 네트워크는 `internal`이라 nginx에서 db가 보이지 않고, db는 외부 인터넷에도 나갈 수 없습니다.
 - 세 서비스 모두 `restart: unless-stopped`이고, 로그는 컨테이너마다 10MB × 3개까지만 남깁니다.
 - 시작 순서: db가 healthy → app 시작 → app이 healthy(`/actuator/health`) → nginx 시작.
@@ -215,14 +216,17 @@ aws ecr get-login-password --region <리전> | docker login --username AWS --pas
 
 ### 3. 서버 준비
 
-`deploy/` 폴더만 서버로 복사하고(스크립트 포함), 그 안에서 `.env`를 만듭니다. 비밀값이 들어가므로 권한을 좁혀 둡니다.
+EC2를 처음 만드는 것부터(보안 그룹, Docker 설치, 스왑 등) 단계별 확인 방법까지 담은 런북은 [`deploy/DEPLOY.md`](deploy/DEPLOY.md)입니다. 여기서는 요약만 적습니다.
+
+`deploy/` 폴더의 내용을 서버의 `/opt/family-app`으로 복사하고(스크립트 포함), 그 안에서 `.env`를 만듭니다. 비밀값이 들어가므로 권한을 좁혀 둡니다.
 
 ```bash
-# 로컬에서
-scp -r deploy <서버>:~/family-app
+# 로컬에서 (서버의 .env·백업·배포 기록은 덮어쓰지 않음. deploy/ 끝의 /를 빼면 폴더가 한 단계 더 생김)
+rsync -av --exclude='.env' --exclude='backups/' --exclude='.previous-tag' --exclude='deploy-history.log' \
+  deploy/ <서버>:/opt/family-app/
 
 # 서버에서
-cd ~/family-app
+cd /opt/family-app
 cp .env.example .env
 chmod 600 .env
 vi .env                  # 값 채우기
@@ -285,7 +289,7 @@ diff v1-schema.sql prod-schema.sql   # 주석·SET 줄 외의 차이가 없어�
 ### 5. 실행
 
 ```bash
-cd ~/family-app
+cd /opt/family-app
 docker compose pull
 docker compose up -d
 
@@ -318,7 +322,7 @@ heap 밖(metaspace, code cache 등)에서 약 300MB를 서버 크기와 관계�
 새 이미지를 올린 뒤 서버의 배포 폴더에서 실행합니다. app만 교체하고 nginx·db는 그대로 둡니다.
 
 ```bash
-cd ~/family-app
+cd /opt/family-app
 ./deploy.sh <새 태그>        # 예: ./deploy.sh 8f83b08
 ```
 
@@ -425,7 +429,7 @@ cd ~/family-app
 ## 프로젝트 구조
 
 ```
-deploy                    # 운영 서버용 compose(nginx·app·db·certbot), nginx 설정, .env.example, 배포·백업 스크립트, HTTPS.md, BACKUP.md
+deploy                    # 운영 서버용 compose(nginx·app·db·certbot), nginx 설정, .env.example, 배포·백업 스크립트, DEPLOY.md(EC2 런북), HTTPS.md, BACKUP.md
 src/main/resources/db/migration   # Flyway 마이그레이션 (prod 스키마)
 src/main/java/org/miniproject/homeproject
 ├── domain          # 도메인별 entity / repository / service / controller / dto

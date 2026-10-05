@@ -33,7 +33,7 @@ certbot ── 12시간마다 renew ──▶ certbot-etc 볼륨(인증서) ◀�
 ### 1. 80만으로 시작
 
 ```bash
-cd ~/family-app
+cd /opt/family-app
 docker compose up -d
 docker compose logs nginx | grep 40-https
 # ... 인증서가 없어(/etc/letsencrypt/live/<DOMAIN>/fullchain.pem) HTTPS(443)를 끄고 80(ACME 챌린지)만 엽니다.
