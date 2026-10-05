@@ -166,13 +166,16 @@ docker compose down
 
 ## 배포하기
 
-[`deploy/`](deploy) 폴더의 compose 파일로 서버 한 대에 nginx, 앱, PostgreSQL을 함께 띄웁니다. 서버에는 Docker(compose 포함)만 있으면 됩니다.
+[`deploy/`](deploy) 폴더의 compose 파일로 서버 한 대에 nginx, 앱, PostgreSQL, certbot을 함께 띄웁니다. 서버에는 Docker(compose 포함)만 있으면 됩니다.
 
 ```
-인터넷 ──80──▶ nginx ──edge 네트워크──▶ app:8080 ──backend 네트워크──▶ db:5432
+인터넷 ──443──▶ nginx(TLS) ──edge 네트워크──▶ app:8080 ──backend 네트워크──▶ db:5432
+       ──80───▶ nginx: ACME 챌린지 응답, 나머지는 https로 리다이렉트
+                certbot: Let's Encrypt 인증서 발급·갱신 (nginx와 볼륨으로 공유)
 ```
 
-- 외부에 열리는 포트는 nginx의 80번 하나입니다. app과 db는 포트를 열지 않고 Docker 네트워크 안에서만 통신합니다.
+- 외부에 열리는 포트는 nginx의 80, 443입니다. app과 db는 포트를 열지 않고 Docker 네트워크 안에서만 통신합니다.
+- HTTPS 인증서의 최초 발급과 자동 갱신은 [`deploy/HTTPS.md`](deploy/HTTPS.md)에 있습니다.
 - `backend` 네트워크는 `internal`이라 nginx에서 db가 보이지 않고, db는 외부 인터넷에도 나갈 수 없습니다.
 - 세 서비스 모두 `restart: unless-stopped`이고, 로그는 컨테이너마다 10MB × 3개까지만 남깁니다.
 - 시작 순서: db가 healthy → app 시작 → app이 healthy(`/actuator/health`) → nginx 시작.
@@ -230,6 +233,7 @@ docker login <레지스트리>  # 비공개 레지스트리라면
 | `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD` | db 컨테이너를 처음 만들 때 이 값으로 DB와 계정을 만들고, 앱도 같은 값으로 접속합니다. 비밀번호는 `openssl rand -base64 24`로 생성 |
 | `JWT_SECRET` | `openssl rand -base64 48`로 만든 값. 서버마다 다르게, 한 번 정하면 바꾸지 않기 (바꾸면 모든 사용자가 다시 로그인해야 함) |
 | `CORS_ALLOWED_ORIGINS` | 배포된 프론트 주소 (예: `https://family.example.com`) |
+| `DOMAIN`, `CERTBOT_EMAIL` | 이 API의 도메인(예: `api.example.com`, DNS가 이 서버를 가리켜야 함)과 Let's Encrypt 계정 이메일. [`HTTPS.md`](deploy/HTTPS.md) 참고 |
 | `APP_MEM_LIMIT`, `APP_HEAP_PERCENT` | 선택. [5단계](#5-실행)의 메모리 표 참고 |
 
 필수 값이 비어 있으면 `docker compose`가 실행 전에 `required variable DB_PASSWORD is missing a value`처럼 빠진 변수를 알려 주고 멈춥니다.
@@ -283,10 +287,12 @@ cd ~/family-app
 docker compose pull
 docker compose up -d
 
-docker compose ps                         # app, db가 (healthy), nginx가 Up이면 준비 완료
-curl -s localhost/actuator/health         # {"status":"UP"}
-docker compose logs -f app                # 앱 로그
+docker compose ps                           # app, db가 (healthy), nginx·certbot이 Up이면 준비 완료
+curl -s https://<DOMAIN>/actuator/health    # {"status":"UP"}
+docker compose logs -f app                  # 앱 로그
 ```
+
+처음 띄울 때는 인증서가 없어 nginx가 80(인증서 발급용)만 엽니다. [`HTTPS.md`](deploy/HTTPS.md)의 최초 발급 1~4단계를 진행하면 443이 열립니다.
 
 app 컨테이너에는 메모리 제한(`APP_MEM_LIMIT`, 기본 `768m`)이 걸려 있습니다. JVM은 heap 상한을 이 제한의 비율(`APP_HEAP_PERCENT`, 기본 50%)로 잡는데, 제한이 없으면 서버 전체 메모리를 기준으로 잡아 OS와 DB가 쓸 메모리까지 넘보기 때문입니다.
 
@@ -297,14 +303,13 @@ app 컨테이너에는 메모리 제한(`APP_MEM_LIMIT`, 기본 `768m`)이 걸�
 
 heap 밖(metaspace, code cache 등)에서 약 300MB를 서버 크기와 관계없이 고정으로 쓰기 때문에, 1GB 서버에서 75%로 올리면 컨테이너가 메모리 제한에 걸려 강제 종료(OOMKilled)될 수 있습니다. 이 compose는 PostgreSQL과 nginx도 같은 서버에 띄우므로 2GB 이상 서버를 권장합니다.
 
-**nginx** ([`deploy/nginx/default.conf`](deploy/nginx/default.conf))
+**nginx** ([`deploy/nginx/`](deploy/nginx))
 
-- 80번으로 받은 요청을 `app:8080`으로 넘기고, `X-Forwarded-For`/`-Proto`/`-Host`/`-Port`와 `X-Real-IP`를 붙입니다. 앱은 `server.forward-headers-strategy: native`(prod)로 이 헤더를 읽어 실제 클라이언트 IP와 https 여부를 압니다.
+- 80은 Let's Encrypt 챌린지 응답과 `https://<DOMAIN>` 리다이렉트만 합니다. 443에서 TLS를 종료하고 `app:8080`으로 넘깁니다. TLS 설정과 보안 헤더(HSTS 등)는 [`HTTPS.md`](deploy/HTTPS.md)에 정리했습니다.
+- `X-Forwarded-For`/`-Proto`/`-Host`/`-Port`와 `X-Real-IP`를 붙여 넘깁니다. 앱은 `server.forward-headers-strategy: native`(prod)로 이 헤더를 읽어 실제 클라이언트 IP와 https 여부를 압니다.
 - nginx가 맨 앞단이므로 클라이언트가 보낸 `X-Forwarded-For`는 버리고 실제 접속 IP로 덮어씁니다. 앞에 로드밸런서(ALB 등)를 두게 되면 설정 파일의 주석대로 바꿉니다.
 - actuator는 `/actuator/health`만 통과시키고 나머지 `/actuator/**`는 404로 막습니다. 앱도 health만 노출하므로 이중으로 막는 셈입니다.
 - app 주소를 요청 때마다 Docker DNS로 다시 찾기 때문에, app 컨테이너가 새로 만들어져 IP가 바뀌어도 nginx를 재시작할 필요가 없습니다.
-
-**HTTPS**는 인증서(예: Let's Encrypt)를 준비한 뒤 `default.conf`에 `listen 443 ssl` server 블록을 추가하고, compose의 `"443:443"` 주석을 풉니다.
 
 ### 6. 업데이트와 되돌리기
 
@@ -418,7 +423,7 @@ cd ~/family-app
 ## 프로젝트 구조
 
 ```
-deploy                    # 운영 서버용 compose(nginx·app·db), nginx 설정, .env.example, 배포 스크립트
+deploy                    # 운영 서버용 compose(nginx·app·db·certbot), nginx 설정, .env.example, 배포 스크립트, HTTPS.md
 src/main/resources/db/migration   # Flyway 마이그레이션 (prod 스키마)
 src/main/java/org/miniproject/homeproject
 ├── domain          # 도메인별 entity / repository / service / controller / dto

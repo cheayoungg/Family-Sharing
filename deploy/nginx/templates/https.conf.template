@@ -1,0 +1,65 @@
+# 443: TLS 종료 후 app:8080으로 프록시
+# 인증서가 아직 없으면 entrypoint/40-https-if-cert.sh가 이 설정을 빼고 시작한다 (deploy/HTTPS.md 참고)
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${DOMAIN};
+    server_tokens off;
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+
+    # Mozilla "intermediate" 권장 설정 기준. TLS 1.0/1.1은 받지 않는다.
+    # DHE 계열은 별도 dhparam이 필요해 빼고, 모든 현대 클라이언트가 지원하는 ECDHE만 쓴다.
+    # Let's Encrypt가 2025년에 OCSP를 종료해 OCSP stapling은 켜지 않는다
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+    ssl_session_timeout 1d;
+    ssl_session_cache shared:TLS:10m;
+    ssl_session_tickets off;
+
+    # 보안 헤더는 nginx 한 곳에서 붙인다. Spring Security가 붙이는 같은 헤더는 숨겨 중복을 막는다.
+    # location에서 add_header를 쓰면 이 설정이 상속되지 않으므로 location에는 쓰지 않는다
+    proxy_hide_header Strict-Transport-Security;
+    proxy_hide_header X-Content-Type-Options;
+    proxy_hide_header X-Frame-Options;
+    # HSTS: 2년. 이 도메인(과 하위 도메인)은 브라우저가 https로만 접속한다. 되돌리기 어려우므로 HTTPS.md의 주의 참고
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    # JSON API만 응답하므로(prod는 Swagger 꺼짐) 어떤 리소스 로드·프레임 삽입도 허용하지 않는다
+    add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'" always;
+    add_header Referrer-Policy "no-referrer" always;
+
+    # Docker 내장 DNS. app 컨테이너가 새 이미지로 다시 만들어지면 IP가 바뀌므로,
+    # 시작할 때 한 번만 찾지 않고 요청 때마다(10초 캐시) 다시 찾는다
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    set $app_upstream http://app:8080;
+
+    client_max_body_size 10m;
+
+    # 앱이 원래 요청(클라이언트 IP, https 여부, 호스트)을 알 수 있게 넘긴다
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    # nginx가 맨 앞단이므로 클라이언트가 보낸 X-Forwarded-For는 버리고 실제 접속 IP로 덮어쓴다.
+    # 앞에 로드밸런서(ALB 등)를 두게 되면 $proxy_add_x_forwarded_for로 바꿔 그 값을 이어 받는다
+    proxy_set_header X-Forwarded-For   $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host  $host;
+    proxy_set_header X-Forwarded-Port  $server_port;
+
+    # 헬스체크만 공개하고 나머지 actuator 경로는 앱까지 보내지 않는다 (앱도 health만 노출하지만 한 겹 더 막는다)
+    location = /actuator/health {
+        proxy_pass $app_upstream;
+    }
+
+    location /actuator/ {
+        return 404;
+    }
+
+    location / {
+        proxy_pass $app_upstream;
+    }
+}
