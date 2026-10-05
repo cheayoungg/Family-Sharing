@@ -1,0 +1,19 @@
+# 빌드 결과물·IDE 파일 (이미지 안에서 새로 빌드한다)
+.gradle
+build
+out
+bin
+.idea
+*.iml
+.vscode
+
+# 비밀값·개인 설정은 이미지에 넣지 않는다. 실행할 때 환경변수로 주입한다
+.env
+.env.*
+src/main/resources/application-local.yml
+
+# 이미지에 필요 없는 문서
+.git
+blog
+docs
+*.md

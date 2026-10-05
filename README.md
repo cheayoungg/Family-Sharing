@@ -21,12 +21,14 @@
 ## 기술 스택
 
 - Java 17, Spring Boot 3.5.9, Gradle 9.7.1 (Wrapper 포함)
-- Spring Data JPA, PostgreSQL
+- Spring Data JPA, PostgreSQL, Flyway (prod 스키마 마이그레이션)
 - Spring Security + JWT ([jjwt](https://github.com/jwtk/jjwt) 0.12.6), Stateless 인증
 - springdoc-openapi 2.8.17 (Swagger UI)
 - JUnit 5, Testcontainers (테스트용 PostgreSQL)
 
-## 시작하기
+## 로컬에서 실행하기 (Gradle)
+
+개발할 때는 이 방법을 씁니다. Docker 이미지로 실행하는 방법은 [Docker로 실행하기](#docker로-실행하기)를 보세요.
 
 ### 준비물
 
@@ -91,6 +93,160 @@ http://localhost:8080/swagger-ui/index.html
 
 가족장은 시스템 전체에 한 명만 가입할 수 있습니다. 이미 가족장이 있으면 `signup-owner`는 `OWNER_ALREADY_EXISTS`(409)로 실패합니다.
 
+## Docker로 실행하기
+
+배포와 같은 이미지를 로컬에서 띄워 보는 방법입니다. `dev` 프로필을 쓰면 테이블이 자동으로 만들어지고 Swagger도 켜집니다.
+
+```bash
+# 1. 이미지 빌드 (멀티스테이지: JDK로 빌드하고 JRE 이미지에 담음. 처음엔 몇 분 걸립니다)
+docker build -t homeproject .
+
+# 2. 앱과 DB가 서로 찾을 수 있게 네트워크를 만들고 PostgreSQL을 띄움
+docker network create homeproject
+docker run -d --name homeproject-db --network homeproject \
+  -e POSTGRES_USER=homeproject -e POSTGRES_PASSWORD=homeproject -e POSTGRES_DB=homeproject \
+  -v homeproject-db:/var/lib/postgresql/data \
+  postgres:16-alpine
+
+# 3. 환경변수 파일 준비 후 값 채우기
+cp .env.example .env
+```
+
+로컬 확인용 `.env` 예시입니다.
+
+```dotenv
+SPRING_PROFILES_ACTIVE=dev
+DB_URL=jdbc:postgresql://homeproject-db:5432/homeproject
+DB_USERNAME=homeproject
+DB_PASSWORD=homeproject
+JWT_SECRET=여기에-openssl-rand-base64-48-결과를-붙여넣기
+CORS_ALLOWED_ORIGINS=http://localhost:3000
+```
+
+```bash
+# 4. 앱 실행 (./gradlew bootRun이 8080을 쓰고 있으면 먼저 끄거나 -p 18080:8080처럼 바꿉니다)
+docker run -d --name homeproject --network homeproject -p 8080:8080 --env-file .env homeproject
+
+# 로그 확인: "Started HomeProjectApplication"이 보이면 준비 완료
+docker logs -f homeproject
+```
+
+정리할 때는 `docker rm -f homeproject homeproject-db && docker network rm homeproject`를 실행합니다. DB 데이터까지 지우려면 `docker volume rm homeproject-db`도 실행합니다.
+
+### docker compose로 실행하기
+
+위 과정(이미지 빌드, 네트워크, DB, 앱 실행)을 [`docker-compose.yml`](docker-compose.yml) 하나로 묶어 두었습니다. `.env`는 위와 같이 준비합니다.
+
+```bash
+# 이미지를 빌드하고 DB → 앱 순서로 띄움 (DB 헬스체크가 통과한 뒤 앱이 시작됩니다)
+docker compose up -d --build
+
+# 로그 확인: "Started HomeProjectApplication"이 보이면 준비 완료
+docker compose logs -f app
+
+# 정리 (DB 데이터까지 지우려면 docker compose down -v)
+docker compose down
+```
+
+- `DB_URL`은 compose 안의 DB 컨테이너(`jdbc:postgresql://db:5432/homeproject`)로 덮어쓰므로 `.env` 값은 쓰이지 않습니다.
+- `DB_USERNAME`/`DB_PASSWORD`는 DB 컨테이너를 처음 만들 때 계정으로도 쓰입니다. 볼륨이 이미 있으면 바꿔도 반영되지 않으니 `docker compose down -v`로 지우고 다시 띄웁니다.
+- `SPRING_PROFILES_ACTIVE`를 비워 두면 `dev`로 뜹니다. 새 DB에는 테이블이 없어 `prod`(`ddl-auto=validate`)로는 시작하지 못합니다.
+- 8080을 `./gradlew bootRun`이 쓰고 있으면 `APP_PORT=18080 docker compose up -d --build`처럼 포트를 바꿉니다.
+- DB 포트는 로컬 PostgreSQL(5432)과 겹치지 않도록 호스트에 열지 않았습니다.
+
+### 이미지 구성
+
+- **build stage** (`eclipse-temurin:17-jdk`): 의존성을 먼저 받아 캐시해 두고, `./gradlew bootJar -x test`로 jar를 만든 뒤 Spring Boot 레이어별로 풀어 둡니다. 코드만 바뀌면 의존성 다운로드를 건너뛰어 빨리 빌드됩니다.
+- **run stage** (`eclipse-temurin:17-jre`): JRE와 실행 파일만 담고, root가 아닌 `app` 사용자로 실행합니다.
+- 기본 프로필은 `prod`입니다. dev 서버는 `SPRING_PROFILES_ACTIVE=dev`로 덮어씁니다.
+- JVM 시간대를 `Asia/Seoul`로 고정했습니다. `createdAt` 같은 기록 시각도 일정 시각과 같은 한국 시간으로 저장됩니다.
+- 테스트는 이미지 빌드 안에서 돌리지 않습니다. Testcontainers가 Docker를 필요로 하기 때문입니다. 배포 전에 `./gradlew test`로 따로 돌립니다.
+
+## 배포하기
+
+서버에 Docker가 설치돼 있고, 앱이 붙을 PostgreSQL이 준비돼 있다고 가정합니다.
+
+### 1. 테스트
+
+```bash
+./gradlew test
+```
+
+### 2. 이미지 빌드와 업로드
+
+```bash
+# 태그는 커밋 해시처럼 버전을 구분할 수 있는 값을 씁니다
+TAG=$(git rev-parse --short HEAD)
+
+# Apple Silicon(M1 등) Mac에서 일반 x86 서버용 이미지를 만들 때는 --platform을 꼭 붙입니다
+docker buildx build --platform linux/amd64 -t <레지스트리>/homeproject:$TAG --push .
+```
+
+`<레지스트리>`는 Docker Hub 계정, `ghcr.io/<계정>`, AWS ECR 주소 등 사용하는 레지스트리로 바꿉니다. 처음이라면 `docker login`이 필요합니다.
+
+### 3. 서버에 환경변수 파일 준비
+
+`.env.example`을 서버로 복사해 `.env`로 저장하고 값을 채웁니다. 비밀값이 들어가므로 권한을 좁혀 둡니다.
+
+```bash
+chmod 600 .env
+```
+
+| 변수 | 값 |
+| --- | --- |
+| `SPRING_PROFILES_ACTIVE` | `prod` 또는 `dev` |
+| `DB_URL` | `jdbc:postgresql://<DB 호스트>:5432/<DB 이름>` |
+| `DB_USERNAME`, `DB_PASSWORD` | DB 계정 |
+| `JWT_SECRET` | `openssl rand -base64 48`로 만든 값. 서버마다 다르게, 한 번 정하면 바꾸지 않기 (바꾸면 모든 사용자가 다시 로그인해야 함) |
+| `CORS_ALLOWED_ORIGINS` | 배포된 프론트 주소 (예: `https://family.example.com`) |
+
+### 4. DB 스키마 (Flyway)
+
+`prod` 프로필은 시작할 때 Flyway가 [`src/main/resources/db/migration`](src/main/resources/db/migration)의 마이그레이션을 DB에 적용하고, 그 결과를 `ddl-auto: validate`가 엔티티와 대조합니다. 빈 DB라면 첫 실행에서 `V1__init_schema.sql`로 테이블이 만들어지므로 따로 준비할 것이 없습니다. 적용 이력은 DB의 `flyway_schema_history` 테이블에 남습니다.
+
+**스키마를 바꿀 때**는 엔티티를 고치고 `V2__add_xxx.sql`처럼 버전 번호를 올린 새 파일을 추가합니다. 이미 배포된 마이그레이션 파일은 수정하지 않습니다(체크섬이 달라져 시작이 멈춥니다). `FlywayMigrationTest`가 빈 DB에 마이그레이션을 적용해 엔티티와 맞는지 확인하므로, 파일을 빠뜨리면 `./gradlew test`에서 걸립니다.
+
+**Flyway 도입 전에 테이블을 만든 DB**(예전 방식대로 `dev`로 한 번 띄워 만든 prod DB)는 `flyway_schema_history`가 없어 `Found non-empty schema(s) ... but no schema history table`로 시작이 멈춥니다. 스키마가 `V1`과 같다면, 한 번만 `.env`에 `SPRING_FLYWAY_BASELINE_ON_MIGRATE=true`를 추가해 실행합니다. 현재 상태를 버전 1로 기록하고 `V1`은 건너뜁니다. 기록이 생긴 뒤에는 이 줄을 지웁니다.
+
+### 5. 실행
+
+```bash
+docker pull <레지스트리>/homeproject:$TAG
+docker run -d --name homeproject --restart unless-stopped \
+  -p 8080:8080 --env-file .env \
+  <레지스트리>/homeproject:$TAG
+
+docker logs -f homeproject   # "Started HomeProjectApplication" 확인
+```
+
+DB가 같은 서버의 Docker 컨테이너라면 [Docker로 실행하기](#docker로-실행하기)처럼 같은 네트워크(`--network`)에 붙이고, `DB_URL`의 호스트에 DB 컨테이너 이름을 씁니다.
+
+HTTPS는 앱 앞에 Nginx 같은 리버스 프록시나 클라우드 로드밸런서를 두고 처리합니다.
+
+### 6. 업데이트와 되돌리기
+
+새 이미지를 받아 컨테이너만 바꿉니다. 문제가 생기면 이전 태그로 같은 명령을 다시 실행하면 됩니다.
+
+```bash
+docker pull <레지스트리>/homeproject:$NEW_TAG
+docker rm -f homeproject
+docker run -d --name homeproject --restart unless-stopped -p 8080:8080 --env-file .env <레지스트리>/homeproject:$NEW_TAG
+```
+
+### 시작이 안 될 때
+
+필수 설정이 빠지면 앱은 시작 단계에서 멈춥니다(종료 코드 1). `docker logs homeproject`에서 아래 메시지를 찾아보세요.
+
+| 로그 메시지 | 원인 |
+| --- | --- |
+| `cors.allowed-origins에 쓰인 환경변수가 설정되지 않았습니다: ${CORS_ALLOWED_ORIGINS}` | `CORS_ALLOWED_ORIGINS` 없음 |
+| `Could not resolve placeholder 'JWT_SECRET'` | `JWT_SECRET` 없음 |
+| `'url' must start with "jdbc"` | `DB_URL` 없음 또는 형식 오류 |
+| `password authentication failed for user "${DB_USERNAME}"` | `DB_USERNAME` 없음 (변수 이름이 그대로 계정명으로 쓰임) |
+| `Schema-validation: missing ...` | 엔티티는 바뀌었는데 마이그레이션 파일을 추가하지 않음 ([4단계](#4-db-스키마-flyway) 참고) |
+| `Found non-empty schema(s) ... but no schema history table` | Flyway 도입 전에 만든 DB ([4단계](#4-db-스키마-flyway)의 baseline 참고) |
+| `Migration checksum mismatch` | 이미 적용된 마이그레이션 파일을 수정함. 되돌리고 새 버전 파일로 변경 |
+
 ## 설정
 
 `application.yml`은 프로필만 고르고(`SPRING_PROFILES_ACTIVE`, 기본값 `local`), 환경별 값은 프로필 파일에서 환경변수로 읽습니다. DB 계정 같은 비밀값은 저장소에 커밋하지 않습니다.
@@ -99,23 +255,36 @@ http://localhost:8080/swagger-ui/index.html
 | --- | --- | --- | --- |
 | `local` | 로컬 개발 | `update` | 켜짐 |
 | `dev` | 배포된 개발 서버 | `update` | 켜짐 |
-| `prod` | 운영 | `validate` (스키마는 직접 관리) | 꺼짐 |
+| `prod` | 운영 | `validate` (스키마는 Flyway로 관리) | 꺼짐 |
 
 ### 환경변수
 
-| local (기본값 있음) | dev / prod (필수, 기본값 없음) | 설명 |
+**local** (`./gradlew bootRun`, `application-local.yml`) — 모두 기본값이 있어서 설정하지 않아도 됩니다.
+
+| 환경변수 | 기본값 | 설명 |
 | --- | --- | --- |
-| `HOMEPROJECT_DB_HOST` (`localhost`) | `DB_HOST` | DB 호스트 |
-| `HOMEPROJECT_DB_PORT` (`5432`) | `DB_PORT` | DB 포트 |
-| `HOMEPROJECT_DB_NAME` (`homeproject`) | `DB_NAME` | DB 이름 |
-| `HOMEPROJECT_DB_USERNAME` (`admin`) | `DB_USERNAME` | DB 계정 |
-| `HOMEPROJECT_DB_PASSWORD` (`1234`) | `DB_PASSWORD` | DB 비밀번호 |
-| `HOMEPROJECT_JWT_SECRET` (로컬 전용 값) | `JWT_SECRET` | JWT 서명 키 (32바이트 이상) |
-| `HOMEPROJECT_CORS_ALLOWED_ORIGINS` (`http://localhost:3000`) | `CORS_ALLOWED_ORIGINS` | 허용할 프론트 origin, 쉼표로 구분 |
+| `HOMEPROJECT_DB_HOST` | `localhost` | DB 호스트 |
+| `HOMEPROJECT_DB_PORT` | `5432` | DB 포트 |
+| `HOMEPROJECT_DB_NAME` | `homeproject` | DB 이름 |
+| `HOMEPROJECT_DB_USERNAME` | `admin` | DB 계정 |
+| `HOMEPROJECT_DB_PASSWORD` | `1234` | DB 비밀번호 |
+| `HOMEPROJECT_JWT_SECRET` | 로컬 전용 값 | JWT 서명 키 (32바이트 이상) |
+| `HOMEPROJECT_CORS_ALLOWED_ORIGINS` | `http://localhost:3000` | 허용할 프론트 origin, 쉼표로 구분 |
 
 로컬 환경변수에 `HOMEPROJECT_` 접두어를 붙이는 이유가 있습니다. 다른 프로젝트 때문에 셸에 export해 둔 `DB_HOST`, `JWT_SECRET` 같은 값이 끼어들면, 앱이 조용히 엉뚱한 DB에 붙을 수 있기 때문입니다.
 
-dev/prod는 필수 환경변수가 하나라도 없으면 앱이 시작되지 않습니다.
+**dev / prod** (Docker 실행) — 모두 필수이고 기본값이 없습니다. 목록과 설명은 [`.env.example`](.env.example)에 있습니다.
+
+| 환경변수 | 설명 |
+| --- | --- |
+| `SPRING_PROFILES_ACTIVE` | `prod`(이미지 기본값) 또는 `dev` |
+| `DB_URL` | JDBC URL (예: `jdbc:postgresql://db.example.com:5432/homeproject`) |
+| `DB_USERNAME` | DB 계정 |
+| `DB_PASSWORD` | DB 비밀번호 |
+| `JWT_SECRET` | JWT 서명 키 (32바이트 이상) |
+| `CORS_ALLOWED_ORIGINS` | 허용할 프론트 origin, 쉼표로 구분 |
+
+필수 환경변수가 하나라도 없으면 앱이 시작되지 않습니다([시작이 안 될 때](#시작이-안-될-때) 참고).
 
 ## 테스트
 

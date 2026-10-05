@@ -1,6 +1,6 @@
 spring:
   datasource:
-    url: jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}
+    url: ${DB_URL} # 예) jdbc:postgresql://db.example.com:5432/homeproject
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
   jpa:
