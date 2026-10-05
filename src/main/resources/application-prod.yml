@@ -11,6 +11,11 @@ spring:
       ddl-auto: validate
     show-sql: false
 
+# nginx가 넘기는 X-Forwarded-For/Proto/Host를 읽어 원래 클라이언트 IP·https 여부로 처리한다.
+# Tomcat은 사설 IP 대역(Docker 네트워크 포함)에서 온 요청의 헤더만 믿으므로, 외부에서 직접 위조한 헤더는 무시된다
+server:
+  forward-headers-strategy: native
+
 jwt:
   secret: ${JWT_SECRET}
   expiration: 86400000 # 24h

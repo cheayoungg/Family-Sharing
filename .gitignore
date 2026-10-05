@@ -39,3 +39,4 @@ out/
 ### Local secrets ###
 application-local.yml
 .env
+deploy/.env

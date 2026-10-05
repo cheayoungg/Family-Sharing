@@ -161,12 +161,21 @@ docker compose down
 - **run stage** (`eclipse-temurin:17-jre`): JRE와 실행 파일만 담고, root가 아닌 `app` 사용자로 실행합니다.
 - 기본 프로필은 `prod`입니다. dev 서버는 `SPRING_PROFILES_ACTIVE=dev`로 덮어씁니다.
 - JVM 시간대를 `Asia/Seoul`로 고정했습니다. `createdAt` 같은 기록 시각도 일정 시각과 같은 한국 시간으로 저장됩니다.
-- heap 상한은 컨테이너 메모리 제한의 50%입니다(`JAVA_TOOL_OPTIONS`로 변경 가능, [배포 5단계](#5-실행) 참고). GC는 작은 heap에 맞는 Serial GC로 고정했고, OutOfMemoryError가 나면 프로세스를 종료해 `--restart` 정책으로 다시 뜨게 합니다.
+- heap 상한은 컨테이너 메모리 제한의 50%입니다(`JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=<비율>`로 변경 가능, [배포 5단계](#5-실행) 참고). `docker run`으로 띄울 때는 `--memory`를 꼭 붙입니다. 제한이 없으면 서버 전체 메모리 기준으로 heap을 잡습니다. GC는 작은 heap에 맞는 Serial GC로 고정했고, OutOfMemoryError가 나면 프로세스를 종료해 restart 정책으로 다시 뜨게 합니다.
 - 테스트는 이미지 빌드 안에서 돌리지 않습니다. Testcontainers가 Docker를 필요로 하기 때문입니다. 배포 전에 `./gradlew test`로 따로 돌립니다.
 
 ## 배포하기
 
-서버에 Docker가 설치돼 있고, 앱이 붙을 PostgreSQL 서버가 있다고 가정합니다. 운영 DB를 처음 만드는 방법은 [4단계](#4-db-스키마-flyway)에 있습니다.
+[`deploy/`](deploy) 폴더의 compose 파일로 서버 한 대에 nginx, 앱, PostgreSQL을 함께 띄웁니다. 서버에는 Docker(compose 포함)만 있으면 됩니다.
+
+```
+인터넷 ──80──▶ nginx ──edge 네트워크──▶ app:8080 ──backend 네트워크──▶ db:5432
+```
+
+- 외부에 열리는 포트는 nginx의 80번 하나입니다. app과 db는 포트를 열지 않고 Docker 네트워크 안에서만 통신합니다.
+- `backend` 네트워크는 `internal`이라 nginx에서 db가 보이지 않고, db는 외부 인터넷에도 나갈 수 없습니다.
+- 세 서비스 모두 `restart: unless-stopped`이고, 로그는 컨테이너마다 10MB × 3개까지만 남깁니다.
+- 시작 순서: db가 healthy → app 시작 → app이 healthy(`/actuator/health`) → nginx 시작.
 
 ### 1. 테스트
 
@@ -181,32 +190,44 @@ docker compose down
 TAG=$(git rev-parse --short HEAD)
 
 # Apple Silicon(M1 등) Mac에서 일반 x86 서버용 이미지를 만들 때는 --platform을 꼭 붙입니다
-docker buildx build --platform linux/amd64 -t <레지스트리>/homeproject:$TAG --push .
+docker buildx build --platform linux/amd64 -t <레지스트리>/family-app:$TAG --push .
 ```
 
-`<레지스트리>`는 Docker Hub 계정, `ghcr.io/<계정>`, AWS ECR 주소 등 사용하는 레지스트리로 바꿉니다. 처음이라면 `docker login`이 필요합니다.
+`<레지스트리>`는 Docker Hub 계정, `ghcr.io/<계정>`, AWS ECR 주소 등 사용하는 레지스트리로 바꿉니다. 처음이라면 `docker login`이 필요합니다. 이미지 이름은 `deploy/docker-compose.yml`이 받는 `family-app`으로 맞춥니다.
 
-### 3. 서버에 환경변수 파일 준비
+### 3. 서버 준비
 
-`.env.example`을 서버로 복사해 `.env`로 저장하고 값을 채웁니다. 비밀값이 들어가므로 권한을 좁혀 둡니다.
+`deploy/` 폴더만 서버로 복사하고, 그 안에서 `.env`를 만듭니다. 비밀값이 들어가므로 권한을 좁혀 둡니다.
 
 ```bash
+# 로컬에서
+scp -r deploy <서버>:~/family-app
+
+# 서버에서
+cd ~/family-app
+cp .env.example .env
 chmod 600 .env
+vi .env                  # 값 채우기
+docker login <레지스트리>  # 비공개 레지스트리라면
 ```
 
 | 변수 | 값 |
 | --- | --- |
-| `SPRING_PROFILES_ACTIVE` | `prod` 또는 `dev` |
-| `DB_URL` | `jdbc:postgresql://<DB 호스트>:5432/<DB 이름>` |
-| `DB_USERNAME`, `DB_PASSWORD` | DB 계정 |
+| `IMAGE_REGISTRY`, `IMAGE_TAG` | 2단계에서 올린 이미지의 레지스트리와 태그 |
+| `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD` | db 컨테이너를 처음 만들 때 이 값으로 DB와 계정을 만들고, 앱도 같은 값으로 접속합니다. 비밀번호는 `openssl rand -base64 24`로 생성 |
 | `JWT_SECRET` | `openssl rand -base64 48`로 만든 값. 서버마다 다르게, 한 번 정하면 바꾸지 않기 (바꾸면 모든 사용자가 다시 로그인해야 함) |
 | `CORS_ALLOWED_ORIGINS` | 배포된 프론트 주소 (예: `https://family.example.com`) |
+| `APP_MEM_LIMIT`, `APP_HEAP_PERCENT` | 선택. [5단계](#5-실행)의 메모리 표 참고 |
+
+필수 값이 비어 있으면 `docker compose`가 실행 전에 `required variable DB_PASSWORD is missing a value`처럼 빠진 변수를 알려 주고 멈춥니다.
 
 ### 4. DB 스키마 (Flyway)
 
-`prod` 프로필은 시작할 때 Flyway가 [`src/main/resources/db/migration`](src/main/resources/db/migration)의 마이그레이션을 DB에 적용하고, 그 결과를 `ddl-auto: validate`가 엔티티와 대조합니다. 빈 DB라면 첫 실행에서 `V1__init_schema.sql`로 테이블이 만들어지므로 따로 준비할 것이 없습니다. 적용 이력은 DB의 `flyway_schema_history` 테이블에 남습니다.
+`prod` 프로필은 시작할 때 Flyway가 [`src/main/resources/db/migration`](src/main/resources/db/migration)의 마이그레이션을 DB에 적용하고, 그 결과를 `ddl-auto: validate`가 엔티티와 대조합니다. 적용 이력은 DB의 `flyway_schema_history` 테이블에 남습니다.
 
-**운영 DB를 처음 만들 때**는 빈 데이터베이스와 앱 계정만 만들고, 테이블은 Flyway에 맡깁니다. PostgreSQL 관리자 계정으로 실행합니다.
+**처음 배포할 때**는 따로 준비할 것이 없습니다. db 컨테이너가 빈 볼륨(`pgdata`)에 `.env`의 `DB_NAME`/`DB_USERNAME`/`DB_PASSWORD`로 DB와 계정(DB 소유자)을 만들고, 앱의 첫 실행에서 Flyway가 `V1__init_schema.sql`로 테이블을 만듭니다. 볼륨이 이미 있으면 이 값을 바꿔도 반영되지 않습니다.
+
+compose 밖의 PostgreSQL(RDS 등)을 쓴다면 빈 데이터베이스와 앱 계정만 만들고, 테이블은 Flyway에 맡깁니다. PostgreSQL 관리자 계정으로 실행합니다.
 
 ```sql
 CREATE USER homeproject WITH PASSWORD '<DB_PASSWORD 값>';
@@ -214,84 +235,92 @@ CREATE DATABASE homeproject OWNER homeproject;
 ```
 
 - 데이터베이스 소유자를 앱 계정으로 둡니다. PostgreSQL 15부터는 소유자가 아닌 일반 계정이 `public` 스키마에 테이블을 만들 수 없어서, 소유자가 아니면 Flyway가 `permission denied for schema public`으로 멈춥니다.
-- DB를 Docker 컨테이너로 띄운다면 `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`로 이 단계가 대신 처리됩니다.
 - 운영 DB에 붙는 **첫 실행은 반드시 `prod` 프로필**로 합니다. `dev`(`ddl-auto: update`)로 한 번이라도 띄우면 Flyway 이력 없이 테이블이 생겨, 이후 `prod`가 시작하지 못합니다. 운영 DB를 dev 서버와 함께 쓰지 않습니다.
 
 첫 실행 뒤에는 마이그레이션이 기록됐는지 확인합니다.
 
-```sql
-SELECT version, description, success FROM flyway_schema_history;
--- 1 | init schema | t
+```bash
+docker compose exec db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT version, description, success FROM flyway_schema_history"'
+# 1 | init schema | t
 ```
 
 **스키마를 바꿀 때**는 엔티티를 고치고 `V2__add_xxx.sql`처럼 버전 번호를 올린 새 파일을 추가합니다. 이미 배포된 마이그레이션 파일은 수정하지 않습니다(체크섬이 달라져 시작이 멈춥니다). `FlywayMigrationTest`가 빈 DB에 마이그레이션을 적용해 엔티티와 맞는지 확인하므로, 파일을 빠뜨리면 `./gradlew test`에서 걸립니다.
 
-**Flyway 도입 전에 테이블을 만든 DB**(예전 방식대로 `dev`로 한 번 띄워 만든 prod DB)는 `flyway_schema_history`가 없어 `Found non-empty schema(s) ... but no schema history table`로 시작이 멈춥니다. 지켜야 할 데이터가 없다면 DB를 지우고 위의 처음 만드는 방법대로 다시 만드는 것이 가장 간단합니다. 데이터를 살려야 한다면 먼저 스키마가 `V1`과 같은지 확인합니다. baseline은 `V1`을 실행하지 않고 건너뛰기 때문입니다. `validate`는 빠진 테이블·컬럼은 잡지만, 남는 컬럼이나 달라진 제약조건(예: `ddl-auto=update`가 갱신하지 않는 CHECK 제약)은 잡지 못합니다.
+**Flyway 도입 전에 테이블을 만든 DB**(예전 방식대로 `dev`로 한 번 띄워 만든 prod DB)는 `flyway_schema_history`가 없어 `Found non-empty schema(s) ... but no schema history table`로 시작이 멈춥니다. 지켜야 할 데이터가 없다면 DB를 지우고 다시 만드는 것이 가장 간단합니다. 데이터를 살려야 한다면 먼저 스키마가 `V1`과 같은지 확인합니다. baseline은 `V1`을 실행하지 않고 건너뛰기 때문입니다. `validate`는 빠진 테이블·컬럼은 잡지만, 남는 컬럼이나 달라진 제약조건(예: `ddl-auto=update`가 갱신하지 않는 CHECK 제약)은 잡지 못합니다.
 
 ```bash
-# V1만 적용한 비교용 DB를 임시 컨테이너로 만들어 스키마를 덤프한다
+# (저장소에서) V1만 적용한 비교용 DB를 임시 컨테이너로 만들어 스키마를 덤프한다
 docker run -d --name v1-check -e POSTGRES_PASSWORD=check postgres:16-alpine
 until docker exec v1-check pg_isready -q -h 127.0.0.1 -U postgres; do sleep 1; done
 docker exec -i v1-check psql -q -v ON_ERROR_STOP=1 -U postgres < src/main/resources/db/migration/V1__init_schema.sql
 docker exec v1-check pg_dump -U postgres --schema-only --no-owner postgres > v1-schema.sql
 docker rm -f v1-check
 
-# 운영 DB의 스키마를 덤프해 비교한다 (pg_dump 버전은 DB 서버 버전 이상이어야 한다)
-pg_dump --schema-only --no-owner -h <DB 호스트> -U <DB_USERNAME> <DB 이름> > prod-schema.sql
+# (서버에서) 운영 DB의 스키마를 덤프해 v1-schema.sql과 비교한다
+docker compose exec db sh -c 'pg_dump -U "$POSTGRES_USER" --schema-only --no-owner "$POSTGRES_DB"' > prod-schema.sql
 diff v1-schema.sql prod-schema.sql   # 주석·SET 줄 외의 차이가 없어야 한다
 ```
 
-차이가 없으면 한 번만 `.env`에 `SPRING_FLYWAY_BASELINE_ON_MIGRATE=true`를 추가해 실행합니다. 현재 상태를 버전 1로 기록하고 `V1`은 건너뜁니다. 기록이 생긴 뒤에는 이 줄을 지웁니다. 차이가 있으면 baseline 전에 운영 DB를 `V1`과 같게 고칩니다.
+차이가 없으면 `.env`에 `FLYWAY_BASELINE_ON_MIGRATE=true`를 넣고 한 번 실행합니다. 현재 상태를 버전 1로 기록하고 `V1`은 건너뜁니다. 기록이 생긴 뒤에는 이 값을 다시 비웁니다. 차이가 있으면 baseline 전에 운영 DB를 `V1`과 같게 고칩니다.
 
 ### 5. 실행
 
 ```bash
-docker pull <레지스트리>/homeproject:$TAG
-docker run -d --name homeproject --restart unless-stopped \
-  --memory=768m \
-  -p 8080:8080 --env-file .env \
-  <레지스트리>/homeproject:$TAG
+cd ~/family-app
+docker compose pull
+docker compose up -d
 
-docker logs -f homeproject   # "Started HomeProjectApplication" 확인
+docker compose ps                         # app, db가 (healthy), nginx가 Up이면 준비 완료
+curl -s localhost/actuator/health         # {"status":"UP"}
+docker compose logs -f app                # 앱 로그
 ```
 
-`--memory`는 꼭 붙입니다. JVM은 heap 상한을 컨테이너 메모리 제한의 비율(기본 50%)로 잡는데, 제한이 없으면 서버 전체 메모리를 기준으로 잡아 OS와 다른 프로세스가 쓸 메모리까지 넘봅니다.
+app 컨테이너에는 메모리 제한(`APP_MEM_LIMIT`, 기본 `768m`)이 걸려 있습니다. JVM은 heap 상한을 이 제한의 비율(`APP_HEAP_PERCENT`, 기본 50%)로 잡는데, 제한이 없으면 서버 전체 메모리를 기준으로 잡아 OS와 DB가 쓸 메모리까지 넘보기 때문입니다.
 
-| 서버 메모리 | `--memory` | heap 비율 |
+| 서버 메모리 | `APP_MEM_LIMIT` | `APP_HEAP_PERCENT` |
 | --- | --- | --- |
-| 1GB | `768m` | 기본값(50%, heap 384MB) 그대로 |
-| 2GB | `1536m` | `-e JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75`로 올려도 됨 (heap 1152MB) |
+| 1GB | `768m` (기본값) | `50` (기본값, heap 384MB) |
+| 2GB | `1536m` | `75`까지 올려도 됨 (heap 1152MB) |
 
-heap 밖(metaspace, code cache 등)에서 약 300MB를 서버 크기와 관계없이 고정으로 쓰기 때문에, 1GB 서버에서 75%로 올리면 컨테이너가 메모리 제한에 걸려 강제 종료(OOMKilled)될 수 있습니다. PostgreSQL도 같은 서버에 띄운다면 그 메모리도 남겨야 하므로 2GB 이상 서버를 권장합니다.
+heap 밖(metaspace, code cache 등)에서 약 300MB를 서버 크기와 관계없이 고정으로 쓰기 때문에, 1GB 서버에서 75%로 올리면 컨테이너가 메모리 제한에 걸려 강제 종료(OOMKilled)될 수 있습니다. 이 compose는 PostgreSQL과 nginx도 같은 서버에 띄우므로 2GB 이상 서버를 권장합니다.
 
-DB가 같은 서버의 Docker 컨테이너라면 [Docker로 실행하기](#docker로-실행하기)처럼 같은 네트워크(`--network`)에 붙이고, `DB_URL`의 호스트에 DB 컨테이너 이름을 씁니다.
+**nginx** ([`deploy/nginx/default.conf`](deploy/nginx/default.conf))
 
-HTTPS는 앱 앞에 Nginx 같은 리버스 프록시나 클라우드 로드밸런서를 두고 처리합니다.
+- 80번으로 받은 요청을 `app:8080`으로 넘기고, `X-Forwarded-For`/`-Proto`/`-Host`/`-Port`와 `X-Real-IP`를 붙입니다. 앱은 `server.forward-headers-strategy: native`(prod)로 이 헤더를 읽어 실제 클라이언트 IP와 https 여부를 압니다.
+- nginx가 맨 앞단이므로 클라이언트가 보낸 `X-Forwarded-For`는 버리고 실제 접속 IP로 덮어씁니다. 앞에 로드밸런서(ALB 등)를 두게 되면 설정 파일의 주석대로 바꿉니다.
+- actuator는 `/actuator/health`만 통과시키고 나머지 `/actuator/**`는 404로 막습니다. 앱도 health만 노출하므로 이중으로 막는 셈입니다.
+- app 주소를 요청 때마다 Docker DNS로 다시 찾기 때문에, app 컨테이너가 새로 만들어져 IP가 바뀌어도 nginx를 재시작할 필요가 없습니다.
+
+**HTTPS**는 인증서(예: Let's Encrypt)를 준비한 뒤 `default.conf`에 `listen 443 ssl` server 블록을 추가하고, compose의 `"443:443"` 주석을 풉니다.
 
 ### 6. 업데이트와 되돌리기
 
-새 이미지를 받아 컨테이너만 바꿉니다. 문제가 생기면 이전 태그로 같은 명령을 다시 실행하면 됩니다.
+`.env`의 `IMAGE_TAG`를 새 태그로 바꾸고 app만 다시 만듭니다. 문제가 생기면 이전 태그로 바꿔 같은 명령을 실행합니다.
 
 ```bash
-docker pull <레지스트리>/homeproject:$NEW_TAG
-docker rm -f homeproject
-docker run -d --name homeproject --restart unless-stopped --memory=768m -p 8080:8080 --env-file .env <레지스트리>/homeproject:$NEW_TAG
+vi .env                       # IMAGE_TAG=<새 태그>
+docker compose pull app
+docker compose up -d app      # app만 새 이미지로 교체. nginx·db는 그대로
 ```
+
+새 app이 healthy가 될 때까지(보통 수십 초) nginx는 502를 돌려줍니다. 무중단 배포는 아닙니다.
 
 ### 시작이 안 될 때
 
-필수 설정이 빠지면 앱은 시작 단계에서 멈춥니다(종료 코드 1). `docker logs homeproject`에서 아래 메시지를 찾아보세요.
+`docker compose ps`에서 app이 `(unhealthy)`이거나 재시작을 반복하면 `docker compose logs app`에서 아래 메시지를 찾아보세요. 필수 설정이 빠지면 앱은 시작 단계에서 멈춥니다(종료 코드 1).
 
 | 로그 메시지 | 원인 |
 | --- | --- |
+| `required variable ... is missing a value` (compose 실행 시) | `.env`에 필수 값이 비어 있음 |
 | `cors.allowed-origins에 쓰인 환경변수가 설정되지 않았습니다: ${CORS_ALLOWED_ORIGINS}` | `CORS_ALLOWED_ORIGINS` 없음 |
 | `Could not resolve placeholder 'JWT_SECRET'` | `JWT_SECRET` 없음 |
 | `'url' must start with "jdbc"` | `DB_URL` 없음 또는 형식 오류 |
-| `password authentication failed for user "${DB_USERNAME}"` | `DB_USERNAME` 없음 (변수 이름이 그대로 계정명으로 쓰임) |
+| `password authentication failed for user ...` | DB 계정·비밀번호가 다름. 볼륨을 만든 뒤 `.env`의 DB 값을 바꾸면 반영되지 않음 |
 | `Schema-validation: missing ...` | 엔티티는 바뀌었는데 마이그레이션 파일을 추가하지 않음 ([4단계](#4-db-스키마-flyway) 참고) |
 | `Found non-empty schema(s) ... but no schema history table` | Flyway 도입 전에 만든 DB ([4단계](#4-db-스키마-flyway)의 baseline 참고) |
-| `permission denied for schema public` | 앱 계정이 데이터베이스 소유자가 아님 ([4단계](#4-db-스키마-flyway)의 처음 만들 때 참고) |
+| `permission denied for schema public` | 앱 계정이 데이터베이스 소유자가 아님 ([4단계](#4-db-스키마-flyway) 참고) |
 | `Migration checksum mismatch` | 이미 적용된 마이그레이션 파일을 수정함. 되돌리고 새 버전 파일로 변경 |
+| nginx가 `502 Bad Gateway` | app이 아직 시작 중이거나 멈춤. `docker compose ps`로 app 상태 확인 |
 
 ## 설정
 
@@ -319,7 +348,7 @@ docker run -d --name homeproject --restart unless-stopped --memory=768m -p 8080:
 
 로컬 환경변수에 `HOMEPROJECT_` 접두어를 붙이는 이유가 있습니다. 다른 프로젝트 때문에 셸에 export해 둔 `DB_HOST`, `JWT_SECRET` 같은 값이 끼어들면, 앱이 조용히 엉뚱한 DB에 붙을 수 있기 때문입니다.
 
-**dev / prod** (Docker 실행) — 모두 필수이고 기본값이 없습니다. 목록과 설명은 [`.env.example`](.env.example)에 있습니다.
+**dev / prod** (Docker 이미지) — 모두 필수이고 기본값이 없습니다. 앱이 직접 읽는 값이며, `docker run --env-file`로 줄 때의 목록과 설명은 [`.env.example`](.env.example)에 있습니다. 운영 compose([`deploy/`](deploy))는 이 값들을 [`deploy/.env.example`](deploy/.env.example)의 변수로 채워 넘깁니다(예: `DB_URL`은 `DB_NAME`으로 만들고 프로필은 `prod`로 고정).
 
 | 환경변수 | 설명 |
 | --- | --- |
@@ -364,6 +393,8 @@ docker run -d --name homeproject --restart unless-stopped --memory=768m -p 8080:
 ## 프로젝트 구조
 
 ```
+deploy                    # 운영 서버용 compose(nginx·app·db), nginx 설정, .env.example
+src/main/resources/db/migration   # Flyway 마이그레이션 (prod 스키마)
 src/main/java/org/miniproject/homeproject
 ├── domain          # 도메인별 entity / repository / service / controller / dto
 │   ├── auth        # 회원가입·로그인
