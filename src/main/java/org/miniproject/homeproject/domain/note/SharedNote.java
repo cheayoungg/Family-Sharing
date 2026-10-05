@@ -6,6 +6,7 @@ import org.miniproject.homeproject.global.entity.BaseEntity;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
+import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
@@ -16,7 +17,7 @@ import lombok.NoArgsConstructor;
 
 @Entity
 @Getter
-@Table(name = "shared_notes")
+@Table(name = "shared_notes", indexes = @Index(name = "idx_shared_notes_category", columnList = "category"))
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class SharedNote extends BaseEntity {
 

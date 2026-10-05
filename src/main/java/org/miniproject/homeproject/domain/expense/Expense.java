@@ -7,6 +7,7 @@ import org.miniproject.homeproject.global.entity.BaseEntity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import lombok.AccessLevel;
 import lombok.Builder;
@@ -15,7 +16,7 @@ import lombok.NoArgsConstructor;
 
 @Entity
 @Getter
-@Table(name = "expenses")
+@Table(name = "expenses", indexes = @Index(name = "idx_expenses_due_date", columnList = "due_date"))
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Expense extends BaseEntity {
 
