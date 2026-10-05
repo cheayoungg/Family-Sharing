@@ -6,6 +6,7 @@ import org.miniproject.homeproject.global.security.JwtAuthenticationFilter;
 import org.miniproject.homeproject.global.security.JwtTokenProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -43,6 +44,8 @@ public class SecurityConfig {
 						.requestMatchers("/api/auth/**", "/error").permitAll()
 						// Swagger UI와 API 스펙. prod에서는 springdoc 설정으로 아예 꺼서 이 경로가 404가 된다
 						.requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
+						// 헬스체크는 토큰 없이 호출된다. 노출하는 actuator 엔드포인트는 application.yml에서 health로 제한한다
+						.requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()
 						.anyRequest().authenticated())
 				.exceptionHandling(exception -> exception
 						.authenticationEntryPoint(authenticationEntryPoint)

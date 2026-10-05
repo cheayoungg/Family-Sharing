@@ -6,3 +6,13 @@ spring:
   # 스키마는 prod에서만 Flyway로 관리한다. local/dev는 ddl-auto=update로 테이블을 만들므로 꺼 둔다
   flyway:
     enabled: false
+
+# 배포 헬스체크(Docker HEALTHCHECK, 로드밸런서)용으로 health만 연다. 상세 정보(DB 종류 등)는 응답에 넣지 않는다
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
