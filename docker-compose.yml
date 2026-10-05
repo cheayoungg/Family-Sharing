@@ -7,6 +7,10 @@
 # DB_URL은 아래에서 compose 안의 db 컨테이너로 덮어쓰므로 .env 값은 무시된다.
 # DB_USERNAME/DB_PASSWORD는 DB 컨테이너를 처음 만들 때 계정으로도 쓰인다.
 # (볼륨이 이미 있으면 계정이 바뀌지 않는다. 바꾸려면 docker compose down -v)
+#
+# dev로 만든 DB 볼륨을 prod로 다시 띄우면 시작에 실패한다. dev는 Flyway 없이
+# ddl-auto=update로 테이블을 만들어서, Flyway가 이력 없는 기존 스키마를 거부하기 때문이다.
+# dev → prod로 바꿀 때는 docker compose down -v로 볼륨을 지우고 띄운다. (prod → dev는 괜찮다)
 # ------------------------------------------------------------------
 
 services:
@@ -28,7 +32,8 @@ services:
     build: .
     env_file: .env
     environment:
-      # 새 DB에는 테이블이 없어 prod(ddl-auto=validate)로는 시작하지 못하므로, 지정하지 않으면 dev로 띄운다
+      # .env(또는 셸)의 SPRING_PROFILES_ACTIVE를 따르고, 없으면 Swagger를 볼 수 있는 dev로 띄운다
+      # prod도 빈 DB에서 시작할 수 있다 (Flyway가 테이블을 만든다)
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
       DB_URL: jdbc:postgresql://db:5432/homeproject
     ports:

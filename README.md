@@ -150,7 +150,8 @@ docker compose down
 
 - `DB_URL`은 compose 안의 DB 컨테이너(`jdbc:postgresql://db:5432/homeproject`)로 덮어쓰므로 `.env` 값은 쓰이지 않습니다.
 - `DB_USERNAME`/`DB_PASSWORD`는 DB 컨테이너를 처음 만들 때 계정으로도 쓰입니다. 볼륨이 이미 있으면 바꿔도 반영되지 않으니 `docker compose down -v`로 지우고 다시 띄웁니다.
-- `SPRING_PROFILES_ACTIVE`를 비워 두면 `dev`로 뜹니다. 새 DB에는 테이블이 없어 `prod`(`ddl-auto=validate`)로는 시작하지 못합니다.
+- `SPRING_PROFILES_ACTIVE`를 비워 두면 Swagger를 볼 수 있는 `dev`로 뜹니다. `prod`도 빈 DB에서 시작할 수 있습니다 (Flyway가 테이블을 만듭니다).
+- `dev`로 만든 DB 볼륨을 `prod`로 다시 띄우면 시작에 실패합니다. `dev`는 Flyway 없이 `ddl-auto=update`로 테이블을 만들어 Flyway 이력이 없기 때문입니다. `dev` → `prod`로 바꿀 때는 `docker compose down -v`로 볼륨을 지우고 띄웁니다.
 - 8080을 `./gradlew bootRun`이 쓰고 있으면 `APP_PORT=18080 docker compose up -d --build`처럼 포트를 바꿉니다.
 - DB 포트는 로컬 PostgreSQL(5432)과 겹치지 않도록 호스트에 열지 않았습니다.
 
@@ -164,7 +165,7 @@ docker compose down
 
 ## 배포하기
 
-서버에 Docker가 설치돼 있고, 앱이 붙을 PostgreSQL이 준비돼 있다고 가정합니다.
+서버에 Docker가 설치돼 있고, 앱이 붙을 PostgreSQL 서버가 있다고 가정합니다. 운영 DB를 처음 만드는 방법은 [4단계](#4-db-스키마-flyway)에 있습니다.
 
 ### 1. 테스트
 
@@ -204,9 +205,42 @@ chmod 600 .env
 
 `prod` 프로필은 시작할 때 Flyway가 [`src/main/resources/db/migration`](src/main/resources/db/migration)의 마이그레이션을 DB에 적용하고, 그 결과를 `ddl-auto: validate`가 엔티티와 대조합니다. 빈 DB라면 첫 실행에서 `V1__init_schema.sql`로 테이블이 만들어지므로 따로 준비할 것이 없습니다. 적용 이력은 DB의 `flyway_schema_history` 테이블에 남습니다.
 
+**운영 DB를 처음 만들 때**는 빈 데이터베이스와 앱 계정만 만들고, 테이블은 Flyway에 맡깁니다. PostgreSQL 관리자 계정으로 실행합니다.
+
+```sql
+CREATE USER homeproject WITH PASSWORD '<DB_PASSWORD 값>';
+CREATE DATABASE homeproject OWNER homeproject;
+```
+
+- 데이터베이스 소유자를 앱 계정으로 둡니다. PostgreSQL 15부터는 소유자가 아닌 일반 계정이 `public` 스키마에 테이블을 만들 수 없어서, 소유자가 아니면 Flyway가 `permission denied for schema public`으로 멈춥니다.
+- DB를 Docker 컨테이너로 띄운다면 `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`로 이 단계가 대신 처리됩니다.
+- 운영 DB에 붙는 **첫 실행은 반드시 `prod` 프로필**로 합니다. `dev`(`ddl-auto: update`)로 한 번이라도 띄우면 Flyway 이력 없이 테이블이 생겨, 이후 `prod`가 시작하지 못합니다. 운영 DB를 dev 서버와 함께 쓰지 않습니다.
+
+첫 실행 뒤에는 마이그레이션이 기록됐는지 확인합니다.
+
+```sql
+SELECT version, description, success FROM flyway_schema_history;
+-- 1 | init schema | t
+```
+
 **스키마를 바꿀 때**는 엔티티를 고치고 `V2__add_xxx.sql`처럼 버전 번호를 올린 새 파일을 추가합니다. 이미 배포된 마이그레이션 파일은 수정하지 않습니다(체크섬이 달라져 시작이 멈춥니다). `FlywayMigrationTest`가 빈 DB에 마이그레이션을 적용해 엔티티와 맞는지 확인하므로, 파일을 빠뜨리면 `./gradlew test`에서 걸립니다.
 
-**Flyway 도입 전에 테이블을 만든 DB**(예전 방식대로 `dev`로 한 번 띄워 만든 prod DB)는 `flyway_schema_history`가 없어 `Found non-empty schema(s) ... but no schema history table`로 시작이 멈춥니다. 스키마가 `V1`과 같다면, 한 번만 `.env`에 `SPRING_FLYWAY_BASELINE_ON_MIGRATE=true`를 추가해 실행합니다. 현재 상태를 버전 1로 기록하고 `V1`은 건너뜁니다. 기록이 생긴 뒤에는 이 줄을 지웁니다.
+**Flyway 도입 전에 테이블을 만든 DB**(예전 방식대로 `dev`로 한 번 띄워 만든 prod DB)는 `flyway_schema_history`가 없어 `Found non-empty schema(s) ... but no schema history table`로 시작이 멈춥니다. 지켜야 할 데이터가 없다면 DB를 지우고 위의 처음 만드는 방법대로 다시 만드는 것이 가장 간단합니다. 데이터를 살려야 한다면 먼저 스키마가 `V1`과 같은지 확인합니다. baseline은 `V1`을 실행하지 않고 건너뛰기 때문입니다. `validate`는 빠진 테이블·컬럼은 잡지만, 남는 컬럼이나 달라진 제약조건(예: `ddl-auto=update`가 갱신하지 않는 CHECK 제약)은 잡지 못합니다.
+
+```bash
+# V1만 적용한 비교용 DB를 임시 컨테이너로 만들어 스키마를 덤프한다
+docker run -d --name v1-check -e POSTGRES_PASSWORD=check postgres:16-alpine
+until docker exec v1-check pg_isready -q -h 127.0.0.1 -U postgres; do sleep 1; done
+docker exec -i v1-check psql -q -v ON_ERROR_STOP=1 -U postgres < src/main/resources/db/migration/V1__init_schema.sql
+docker exec v1-check pg_dump -U postgres --schema-only --no-owner postgres > v1-schema.sql
+docker rm -f v1-check
+
+# 운영 DB의 스키마를 덤프해 비교한다 (pg_dump 버전은 DB 서버 버전 이상이어야 한다)
+pg_dump --schema-only --no-owner -h <DB 호스트> -U <DB_USERNAME> <DB 이름> > prod-schema.sql
+diff v1-schema.sql prod-schema.sql   # 주석·SET 줄 외의 차이가 없어야 한다
+```
+
+차이가 없으면 한 번만 `.env`에 `SPRING_FLYWAY_BASELINE_ON_MIGRATE=true`를 추가해 실행합니다. 현재 상태를 버전 1로 기록하고 `V1`은 건너뜁니다. 기록이 생긴 뒤에는 이 줄을 지웁니다. 차이가 있으면 baseline 전에 운영 DB를 `V1`과 같게 고칩니다.
 
 ### 5. 실행
 
@@ -245,6 +279,7 @@ docker run -d --name homeproject --restart unless-stopped -p 8080:8080 --env-fil
 | `password authentication failed for user "${DB_USERNAME}"` | `DB_USERNAME` 없음 (변수 이름이 그대로 계정명으로 쓰임) |
 | `Schema-validation: missing ...` | 엔티티는 바뀌었는데 마이그레이션 파일을 추가하지 않음 ([4단계](#4-db-스키마-flyway) 참고) |
 | `Found non-empty schema(s) ... but no schema history table` | Flyway 도입 전에 만든 DB ([4단계](#4-db-스키마-flyway)의 baseline 참고) |
+| `permission denied for schema public` | 앱 계정이 데이터베이스 소유자가 아님 ([4단계](#4-db-스키마-flyway)의 처음 만들 때 참고) |
 | `Migration checksum mismatch` | 이미 적용된 마이그레이션 파일을 수정함. 되돌리고 새 버전 파일로 변경 |
 
 ## 설정

@@ -35,4 +35,9 @@ ENV SPRING_PROFILES_ACTIVE=prod \
 	JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -Duser.timezone=Asia/Seoul"
 
 EXPOSE 8080
+
+# DB 연결까지 포함한 /actuator/health로 상태를 본다. start-period는 JVM 기동과 Flyway 마이그레이션 시간
+HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
+	CMD curl -fsS http://localhost:8080/actuator/health || exit 1
+
 ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]
