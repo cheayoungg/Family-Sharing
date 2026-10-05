@@ -43,3 +43,5 @@ deploy/.env
 deploy/.previous-tag
 deploy/deploy-history.log
 deploy/.deploy.lock
+deploy/backups/
+deploy/.backup.lock

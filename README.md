@@ -176,6 +176,7 @@ docker compose down
 
 - 외부에 열리는 포트는 nginx의 80, 443입니다. app과 db는 포트를 열지 않고 Docker 네트워크 안에서만 통신합니다.
 - HTTPS 인증서의 최초 발급과 자동 갱신은 [`deploy/HTTPS.md`](deploy/HTTPS.md)에 있습니다.
+- DB 백업(매일 cron, 선택적 S3 업로드)과 복구 절차는 [`deploy/BACKUP.md`](deploy/BACKUP.md)에 있습니다.
 - `backend` 네트워크는 `internal`이라 nginx에서 db가 보이지 않고, db는 외부 인터넷에도 나갈 수 없습니다.
 - 세 서비스 모두 `restart: unless-stopped`이고, 로그는 컨테이너마다 10MB × 3개까지만 남깁니다.
 - 시작 순서: db가 healthy → app 시작 → app이 healthy(`/actuator/health`) → nginx 시작.
@@ -187,6 +188,7 @@ docker compose down
 | `build-and-push.sh` | 로컬/CI | 테스트·빌드 → 이미지 빌드 → 레지스트리에 push |
 | `deploy.sh <태그>` | 서버 | app을 그 태그로 교체, healthy가 안 되면 이전 태그로 자동 복구 |
 | `rollback.sh` | 서버 | 직전 배포 태그로 되돌리기 |
+| `backup.sh`, `restore.sh <파일>` | 서버 | DB 백업(cron), 백업 파일로 복구 ([`BACKUP.md`](deploy/BACKUP.md)) |
 
 ### 1~2. 테스트, 이미지 빌드와 업로드
 
@@ -423,7 +425,7 @@ cd ~/family-app
 ## 프로젝트 구조
 
 ```
-deploy                    # 운영 서버용 compose(nginx·app·db·certbot), nginx 설정, .env.example, 배포 스크립트, HTTPS.md
+deploy                    # 운영 서버용 compose(nginx·app·db·certbot), nginx 설정, .env.example, 배포·백업 스크립트, HTTPS.md, BACKUP.md
 src/main/resources/db/migration   # Flyway 마이그레이션 (prod 스키마)
 src/main/java/org/miniproject/homeproject
 ├── domain          # 도메인별 entity / repository / service / controller / dto
