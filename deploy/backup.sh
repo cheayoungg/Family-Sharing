@@ -27,7 +27,7 @@ S3 업로드에는 aws CLI와 권한이 필요하다. 액세스 키를 파일에
   -h  이 도움말
 
 cron 예 (매일 03:00, 서버 시간대 기준. BACKUP.md 참고):
-  0 3 * * * cd /home/ubuntu/family-app && ./backup.sh >> backups/backup.log 2>&1
+  0 3 * * * cd /opt/family-app && ./backup.sh >> backups/backup.log 2>&1
 EOF
 }
 
