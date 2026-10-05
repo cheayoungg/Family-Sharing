@@ -100,12 +100,17 @@ start_app() {
 	docker compose up -d --force-recreate app && wait_healthy
 }
 
+# 외부 경로(nginx 443, 인증서 검증 포함)로 확인한다. DNS를 거치지 않도록 도메인을 이 서버로 고정해 요청한다
 check_via_nginx() {
+	local domain url
 	command -v curl >/dev/null 2>&1 || return 0
-	if curl -fsS --max-time 5 http://localhost/actuator/health >/dev/null 2>&1; then
-		echo "nginx 경유 확인: http://localhost/actuator/health OK"
+	domain=$(sed -n 's/^DOMAIN=//p' "$ENV_FILE" | tail -n 1)
+	[ -n "$domain" ] || return 0
+	url="https://$domain/actuator/health"
+	if curl -fsS --max-time 5 --resolve "$domain:443:127.0.0.1" "$url" >/dev/null 2>&1; then
+		echo "nginx 경유 확인: $url OK"
 	else
-		echo "경고: nginx 경유 health 확인에 실패했습니다. 'docker compose ps'로 nginx 상태를 확인하세요." >&2
+		echo "경고: nginx 경유 health 확인($url)에 실패했습니다. 'docker compose ps'로 nginx 상태와 인증서(HTTPS.md)를 확인하세요." >&2
 	fi
 }
 

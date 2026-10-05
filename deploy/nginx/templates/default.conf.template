@@ -1,0 +1,19 @@
+# 80: Let's Encrypt ACME 챌린지 응답과 https 리다이렉트만 담당한다. app으로는 프록시하지 않는다
+# ${DOMAIN}은 컨테이너 시작 시 .env 값으로 치환된다 (nginx 이미지의 templates 기능)
+
+server {
+    listen 80 default_server;
+    server_name _;
+    server_tokens off;
+
+    # certbot(webroot 방식)이 발급·갱신할 때 Let's Encrypt가 이 경로로 소유권을 확인한다
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type text/plain;
+    }
+
+    # 요청의 Host가 아니라 설정한 도메인으로 보낸다 (Host 헤더를 조작한 리다이렉트 방지)
+    location / {
+        return 301 https://${DOMAIN}$request_uri;
+    }
+}
