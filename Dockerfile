@@ -30,9 +30,11 @@ COPY --from=build /workspace/build/extracted/application/ ./
 USER app
 
 # 프로필은 기본 prod. dev 서버는 실행할 때 SPRING_PROFILES_ACTIVE=dev로 덮어쓴다
-# user.timezone: createdAt·deletedAt 같은 시각도 일정 시각과 같은 한국 시간으로 기록되게 한다
+# heap 상한은 컨테이너 메모리 제한(docker run --memory)의 비율이다. 제한이 없으면 호스트 전체 메모리 기준이 된다.
+# heap 밖(metaspace·code cache·네이티브)이 약 300MB로 고정이라, 1GB 서버(--memory=768m)는 50%라야 여유가 남는다.
+# 2GB 서버(--memory=1536m)는 -e JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75로 올려도 된다
 ENV SPRING_PROFILES_ACTIVE=prod \
-	JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -Duser.timezone=Asia/Seoul"
+	JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=50"
 
 EXPOSE 8080
 
@@ -40,4 +42,9 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=60s --retries=3 \
 	CMD curl -fsS http://localhost:8080/actuator/health || exit 1
 
-ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]
+# 서버 크기와 관계없이 고정할 JVM 옵션. JAVA_TOOL_OPTIONS로 heap 비율만 바꿔도 이 옵션들은 유지된다
+# UseSerialGC: 작은 heap에서는 G1보다 부가 메모리가 적다. 지정하지 않으면 CPU 2개·2GB 이상에서만 G1으로 바뀌어 서버마다 동작이 달라진다
+# ExitOnOutOfMemoryError: OOM 뒤 반쯤 죽은 상태로 남지 않고 종료해 --restart 정책으로 다시 뜨게 한다
+# user.timezone: createdAt·deletedAt 같은 시각도 일정 시각과 같은 한국 시간으로 기록되게 한다
+ENTRYPOINT ["java", "-XX:+UseSerialGC", "-XX:+ExitOnOutOfMemoryError", "-Duser.timezone=Asia/Seoul", \
+	"org.springframework.boot.loader.launch.JarLauncher"]
