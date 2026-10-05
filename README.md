@@ -21,7 +21,7 @@
 ## 기술 스택
 
 - Java 17, Spring Boot 3.5.9, Gradle 9.7.1 (Wrapper 포함)
-- Spring Data JPA, PostgreSQL
+- Spring Data JPA, PostgreSQL, Flyway (prod 스키마 마이그레이션)
 - Spring Security + JWT ([jjwt](https://github.com/jwtk/jjwt) 0.12.6), Stateless 인증
 - springdoc-openapi 2.8.17 (Swagger UI)
 - JUnit 5, Testcontainers (테스트용 PostgreSQL)
@@ -200,14 +200,13 @@ chmod 600 .env
 | `JWT_SECRET` | `openssl rand -base64 48`로 만든 값. 서버마다 다르게, 한 번 정하면 바꾸지 않기 (바꾸면 모든 사용자가 다시 로그인해야 함) |
 | `CORS_ALLOWED_ORIGINS` | 배포된 프론트 주소 (예: `https://family.example.com`) |
 
-### 4. DB 스키마 준비 (prod 첫 배포 시)
+### 4. DB 스키마 (Flyway)
 
-`prod` 프로필은 `ddl-auto: validate`라서 **테이블을 만들지 않고, 테이블이 없으면 시작을 멈춥니다**(`Schema-validation: missing table`). 아직 Flyway 같은 마이그레이션 도구가 없어서, 첫 배포 때는 아래 방법으로 테이블을 만듭니다.
+`prod` 프로필은 시작할 때 Flyway가 [`src/main/resources/db/migration`](src/main/resources/db/migration)의 마이그레이션을 DB에 적용하고, 그 결과를 `ddl-auto: validate`가 엔티티와 대조합니다. 빈 DB라면 첫 실행에서 `V1__init_schema.sql`로 테이블이 만들어지므로 따로 준비할 것이 없습니다. 적용 이력은 DB의 `flyway_schema_history` 테이블에 남습니다.
 
-1. `.env`의 `SPRING_PROFILES_ACTIVE`를 잠시 `dev`로 두고 한 번 실행합니다. 시작 로그를 확인하면 테이블이 만들어진 상태입니다.
-2. 컨테이너를 지우고 `prod`로 바꿔 다시 실행합니다.
+**스키마를 바꿀 때**는 엔티티를 고치고 `V2__add_xxx.sql`처럼 버전 번호를 올린 새 파일을 추가합니다. 이미 배포된 마이그레이션 파일은 수정하지 않습니다(체크섬이 달라져 시작이 멈춥니다). `FlywayMigrationTest`가 빈 DB에 마이그레이션을 적용해 엔티티와 맞는지 확인하므로, 파일을 빠뜨리면 `./gradlew test`에서 걸립니다.
 
-엔티티에 필드를 추가하는 등 스키마가 바뀌는 배포에서는, prod를 올리기 전에 DB에 직접 `ALTER TABLE`을 적용해야 합니다. 배포가 잦아지면 Flyway를 도입하는 것을 권장합니다.
+**Flyway 도입 전에 테이블을 만든 DB**(예전 방식대로 `dev`로 한 번 띄워 만든 prod DB)는 `flyway_schema_history`가 없어 `Found non-empty schema(s) ... but no schema history table`로 시작이 멈춥니다. 스키마가 `V1`과 같다면, 한 번만 `.env`에 `SPRING_FLYWAY_BASELINE_ON_MIGRATE=true`를 추가해 실행합니다. 현재 상태를 버전 1로 기록하고 `V1`은 건너뜁니다. 기록이 생긴 뒤에는 이 줄을 지웁니다.
 
 ### 5. 실행
 
@@ -244,7 +243,9 @@ docker run -d --name homeproject --restart unless-stopped -p 8080:8080 --env-fil
 | `Could not resolve placeholder 'JWT_SECRET'` | `JWT_SECRET` 없음 |
 | `'url' must start with "jdbc"` | `DB_URL` 없음 또는 형식 오류 |
 | `password authentication failed for user "${DB_USERNAME}"` | `DB_USERNAME` 없음 (변수 이름이 그대로 계정명으로 쓰임) |
-| `Schema-validation: missing table [...]` | `prod` 프로필인데 DB에 테이블이 없음 ([4단계](#4-db-스키마-준비-prod-첫-배포-시) 참고) |
+| `Schema-validation: missing ...` | 엔티티는 바뀌었는데 마이그레이션 파일을 추가하지 않음 ([4단계](#4-db-스키마-flyway) 참고) |
+| `Found non-empty schema(s) ... but no schema history table` | Flyway 도입 전에 만든 DB ([4단계](#4-db-스키마-flyway)의 baseline 참고) |
+| `Migration checksum mismatch` | 이미 적용된 마이그레이션 파일을 수정함. 되돌리고 새 버전 파일로 변경 |
 
 ## 설정
 
@@ -254,7 +255,7 @@ docker run -d --name homeproject --restart unless-stopped -p 8080:8080 --env-fil
 | --- | --- | --- | --- |
 | `local` | 로컬 개발 | `update` | 켜짐 |
 | `dev` | 배포된 개발 서버 | `update` | 켜짐 |
-| `prod` | 운영 | `validate` (스키마는 직접 관리) | 꺼짐 |
+| `prod` | 운영 | `validate` (스키마는 Flyway로 관리) | 꺼짐 |
 
 ### 환경변수
 

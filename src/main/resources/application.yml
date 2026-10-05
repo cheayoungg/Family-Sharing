@@ -3,3 +3,6 @@ spring:
     name: HomeProject
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:local}
+  # 스키마는 prod에서만 Flyway로 관리한다. local/dev는 ddl-auto=update로 테이블을 만들므로 꺼 둔다
+  flyway:
+    enabled: false
