@@ -1,4 +1,4 @@
--- 초기 스키마: 로컬 DB(Hibernate ddl-auto=update로 생성)의 테이블 구조를 그대로 옮겼다.
+-- 초기 스키마: JPA 엔티티의 매핑(테이블·컬럼·제약조건·@Index)과 같게 맞춘다. prod는 ddl-auto=validate로 대조한다.
 -- 이미 적용된 마이그레이션은 수정하지 않는다. 스키마를 바꿀 때는 V2__...sql처럼 새 파일을 추가한다.
 
 CREATE TABLE users (
@@ -83,3 +83,9 @@ CREATE TABLE shared_notes (
     CONSTRAINT shared_notes_pkey PRIMARY KEY (id),
     CONSTRAINT fk_shared_notes_assignee FOREIGN KEY (assignee_id) REFERENCES users (id)
 );
+
+-- 조회 조건·정렬에 쓰이는 컬럼. users.email, invite_codes.code는 UNIQUE 제약이 인덱스를 만든다
+CREATE INDEX idx_schedules_start_time ON schedules (start_time);  -- 기간과 겹치는 일정 조회, 시작 시각 정렬
+CREATE INDEX idx_tasks_assignee_id ON tasks (assignee_id);         -- 담당자별 할 일 조회
+CREATE INDEX idx_shared_notes_category ON shared_notes (category); -- 카테고리별 메모 조회
+CREATE INDEX idx_expenses_due_date ON expenses (due_date);         -- 납부일 순 지출 목록
