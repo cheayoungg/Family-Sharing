@@ -6,6 +6,10 @@ spring:
   # 스키마는 prod에서만 Flyway로 관리한다. local/dev는 ddl-auto=update로 테이블을 만들므로 꺼 둔다
   flyway:
     enabled: false
+  # DB 커넥션을 응답이 끝날 때까지 잡아 두지 않는다. 엔티티 → DTO 변환은 서비스의 @Transactional 안에서 끝낸다.
+  # 모든 프로필에 적용해, 트랜잭션 밖 지연 로딩(LazyInitializationException)이 운영에서 처음 드러나지 않게 한다
+  jpa:
+    open-in-view: false
 
 # 배포 헬스체크(Docker HEALTHCHECK, 로드밸런서)용으로 health만 연다. 상세 정보(DB 종류 등)는 응답에 넣지 않는다
 management:
