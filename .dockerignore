@@ -28,3 +28,6 @@ docker-compose.yml
 blog
 docs
 *.md
+
+# 운영 서버용 compose·nginx 설정 (이미지에 넣지 않고 서버에 따로 둔다)
+deploy
