@@ -177,27 +177,40 @@ docker compose down
 - 세 서비스 모두 `restart: unless-stopped`이고, 로그는 컨테이너마다 10MB × 3개까지만 남깁니다.
 - 시작 순서: db가 healthy → app 시작 → app이 healthy(`/actuator/health`) → nginx 시작.
 
-### 1. 테스트
+배포 스크립트 ([`deploy/`](deploy)에 있음. 모두 `-h`로 사용법, `-y`로 확인 질문 생략)
+
+| 스크립트 | 어디서 | 하는 일 |
+| --- | --- | --- |
+| `build-and-push.sh` | 로컬/CI | 테스트·빌드 → 이미지 빌드 → 레지스트리에 push |
+| `deploy.sh <태그>` | 서버 | app을 그 태그로 교체, healthy가 안 되면 이전 태그로 자동 복구 |
+| `rollback.sh` | 서버 | 직전 배포 태그로 되돌리기 |
+
+### 1~2. 테스트, 이미지 빌드와 업로드
+
+커밋한 뒤 저장소에서 실행합니다.
 
 ```bash
-./gradlew test
+IMAGE_REGISTRY=<레지스트리> deploy/build-and-push.sh
 ```
 
-### 2. 이미지 빌드와 업로드
+- `./gradlew build`(테스트 포함) → `docker build` → `docker push` 순서로 진행하고, 테스트가 실패하면 그 자리에서 멈춥니다.
+- 이미지는 `<레지스트리>/family-app:<커밋 short sha>`로 올라갑니다. `latest` 태그는 만들지 않습니다. 마지막에 서버에서 쓸 `./deploy.sh <태그>` 명령을 출력합니다.
+- 커밋되지 않은 변경이 있으면 거부합니다. 태그가 커밋을 가리키므로, 변경이 섞인 이미지를 만들지 않기 위해서입니다.
+- 같은 태그가 레지스트리에 이미 있으면 다시 빌드하지 않습니다.
+- 플랫폼은 기본 `linux/amd64`(x86 EC2)입니다. Graviton(arm) 인스턴스라면 `PLATFORM=linux/arm64`를 붙입니다. Apple Silicon Mac에서도 x86용으로 빌드됩니다.
+
+`<레지스트리>`는 `ghcr.io/<계정>`이나 AWS ECR 주소(`<계정 ID>.dkr.ecr.<리전>.amazonaws.com`) 등으로 바꿉니다. 미리 로그인해 둡니다.
 
 ```bash
-# 태그는 커밋 해시처럼 버전을 구분할 수 있는 값을 씁니다
-TAG=$(git rev-parse --short HEAD)
-
-# Apple Silicon(M1 등) Mac에서 일반 x86 서버용 이미지를 만들 때는 --platform을 꼭 붙입니다
-docker buildx build --platform linux/amd64 -t <레지스트리>/family-app:$TAG --push .
+# GHCR (토큰을 표준입력으로)
+docker login ghcr.io -u <계정> --password-stdin
+# ECR
+aws ecr get-login-password --region <리전> | docker login --username AWS --password-stdin <레지스트리>
 ```
-
-`<레지스트리>`는 Docker Hub 계정, `ghcr.io/<계정>`, AWS ECR 주소 등 사용하는 레지스트리로 바꿉니다. 처음이라면 `docker login`이 필요합니다. 이미지 이름은 `deploy/docker-compose.yml`이 받는 `family-app`으로 맞춥니다.
 
 ### 3. 서버 준비
 
-`deploy/` 폴더만 서버로 복사하고, 그 안에서 `.env`를 만듭니다. 비밀값이 들어가므로 권한을 좁혀 둡니다.
+`deploy/` 폴더만 서버로 복사하고(스크립트 포함), 그 안에서 `.env`를 만듭니다. 비밀값이 들어가므로 권한을 좁혀 둡니다.
 
 ```bash
 # 로컬에서
@@ -213,7 +226,7 @@ docker login <레지스트리>  # 비공개 레지스트리라면
 
 | 변수 | 값 |
 | --- | --- |
-| `IMAGE_REGISTRY`, `IMAGE_TAG` | 2단계에서 올린 이미지의 레지스트리와 태그 |
+| `IMAGE_REGISTRY`, `IMAGE_TAG` | 1~2단계에서 올린 이미지의 레지스트리와 태그. 이후 배포에서는 `deploy.sh`가 `IMAGE_TAG`를 바꿉니다 |
 | `DB_NAME`, `DB_USERNAME`, `DB_PASSWORD` | db 컨테이너를 처음 만들 때 이 값으로 DB와 계정을 만들고, 앱도 같은 값으로 접속합니다. 비밀번호는 `openssl rand -base64 24`로 생성 |
 | `JWT_SECRET` | `openssl rand -base64 48`로 만든 값. 서버마다 다르게, 한 번 정하면 바꾸지 않기 (바꾸면 모든 사용자가 다시 로그인해야 함) |
 | `CORS_ALLOWED_ORIGINS` | 배포된 프론트 주소 (예: `https://family.example.com`) |
@@ -295,15 +308,28 @@ heap 밖(metaspace, code cache 등)에서 약 300MB를 서버 크기와 관계�
 
 ### 6. 업데이트와 되돌리기
 
-`.env`의 `IMAGE_TAG`를 새 태그로 바꾸고 app만 다시 만듭니다. 문제가 생기면 이전 태그로 바꿔 같은 명령을 실행합니다.
+새 이미지를 올린 뒤 서버의 배포 폴더에서 실행합니다. app만 교체하고 nginx·db는 그대로 둡니다.
 
 ```bash
-vi .env                       # IMAGE_TAG=<새 태그>
-docker compose pull app
-docker compose up -d app      # app만 새 이미지로 교체. nginx·db는 그대로
+cd ~/family-app
+./deploy.sh <새 태그>        # 예: ./deploy.sh 8f83b08
 ```
 
-새 app이 healthy가 될 때까지(보통 수십 초) nginx는 502를 돌려줍니다. 무중단 배포는 아닙니다.
+1. `.env`의 `IMAGE_TAG`를 바꾸고 `docker compose pull app`. 이미지를 받지 못하면(태그 오타 등) `.env`만 원래대로 돌리고 멈춥니다. 실행 중인 app은 그대로입니다.
+2. `docker compose up -d app`으로 교체하고 app이 healthy가 될 때까지 기다립니다(기본 180초, `HEALTH_TIMEOUT=<초>`로 변경).
+3. unhealthy가 되거나, 시작 중에 종료되거나, 시간 안에 healthy가 되지 않으면 새 app의 최근 로그를 보여 주고 **이전 태그로 자동 복구**합니다.
+4. 성공하면 교체 전 태그를 `.previous-tag`에 기록합니다. 성공·실패는 모두 `deploy-history.log`에 남습니다.
+
+배포한 뒤에 문제를 발견하면 직전 태그로 되돌립니다. 배포와 같은 절차(healthy 대기, 실패 시 자동 복구)를 거칩니다.
+
+```bash
+./rollback.sh                # .previous-tag의 태그로 되돌림
+```
+
+되돌린 뒤에는 되돌리기 전 태그가 `.previous-tag`에 남으므로, 한 번 더 실행하면 원래 태그로 돌아갑니다. 두 단계 이상 전으로 가려면 `deploy-history.log`에서 태그를 찾아 `./deploy.sh <태그>`를 실행합니다.
+
+- 두 배포가 동시에 실행되지 않도록 잠금(`.deploy.lock`)을 겁니다. 배포 중이 아닌데 "다른 배포가 진행 중"이라고 나오면(강제 종료 등) 이 폴더를 지우고 다시 실행합니다.
+- app이 교체되는 동안(로컬 측정 약 4초, 서버 사양에 따라 더 길 수 있음) nginx는 502를 돌려줍니다. 무중단 배포는 아닙니다.
 
 ### 시작이 안 될 때
 
@@ -368,8 +394,7 @@ docker compose up -d app      # app만 새 이미지로 교체. nginx·db는 그
 ./gradlew test --tests 'ScheduleApiTest'         # 테스트 클래스 하나
 ```
 
-- API 테스트는 Testcontainers로 테스트 클래스마다 PostgreSQL 16 컨테이너를 띄우므로 **Docker가 실행 중이어야 합니다.** 로컬 DB는 건드리지 않습니다.
-- `HomeProjectApplicationTests`(컨텍스트 로딩 테스트)만 예외로, 로컬 DB와 `application-local.yml`을 사용합니다.
+- 모든 테스트가 Testcontainers로 테스트 클래스마다 PostgreSQL 16 컨테이너를 띄우므로 **Docker가 실행 중이어야 합니다.** 로컬 DB와 `application-local.yml`은 쓰지 않아서, 저장소를 새로 받은 상태(CI 포함)에서도 그대로 돌아갑니다.
 
 ## API 공통 규칙
 
@@ -393,7 +418,7 @@ docker compose up -d app      # app만 새 이미지로 교체. nginx·db는 그
 ## 프로젝트 구조
 
 ```
-deploy                    # 운영 서버용 compose(nginx·app·db), nginx 설정, .env.example
+deploy                    # 운영 서버용 compose(nginx·app·db), nginx 설정, .env.example, 배포 스크립트
 src/main/resources/db/migration   # Flyway 마이그레이션 (prod 스키마)
 src/main/java/org/miniproject/homeproject
 ├── domain          # 도메인별 entity / repository / service / controller / dto

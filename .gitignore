@@ -40,3 +40,6 @@ out/
 application-local.yml
 .env
 deploy/.env
+deploy/.previous-tag
+deploy/deploy-history.log
+deploy/.deploy.lock
