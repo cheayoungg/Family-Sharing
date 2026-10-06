@@ -112,7 +112,7 @@ class DashboardApiTest {
 		saveSchedule("오늘 병원", "2026-10-02T10:00", "2026-10-02T11:00");
 		saveSchedule("내일 일정", "2026-10-03T00:00", "2026-10-03T01:00");
 		Schedule deletedSchedule = saveSchedule("삭제된 오늘 일정", "2026-10-02T15:00", "2026-10-02T16:00");
-		deletedSchedule.markDeleted();
+		deletedSchedule.markDeleted(LocalDateTime.now());
 		scheduleRepository.save(deletedSchedule);
 
 		saveTask("분리수거", TaskStatus.TODO);

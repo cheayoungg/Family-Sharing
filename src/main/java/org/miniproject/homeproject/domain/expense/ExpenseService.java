@@ -1,5 +1,7 @@
 package org.miniproject.homeproject.domain.expense;
 
+import java.time.Clock;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.miniproject.homeproject.domain.expense.dto.ExpenseCreateRequest;
@@ -16,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 public class ExpenseService {
 
 	private final ExpenseRepository expenseRepository;
+	private final Clock clock;
 
 	/**
 	 * status가 null이면 전체를 돌려준다. 납부 기한이 빠른 순.
@@ -51,7 +54,7 @@ public class ExpenseService {
 
 	@Transactional
 	public void delete(Long expenseId) {
-		findExpense(expenseId).markDeleted();
+		findExpense(expenseId).markDeleted(LocalDateTime.now(clock));
 	}
 
 	private Expense findExpense(Long expenseId) {

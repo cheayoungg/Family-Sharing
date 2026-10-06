@@ -1,5 +1,7 @@
 package org.miniproject.homeproject.domain.task;
 
+import java.time.Clock;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.miniproject.homeproject.domain.task.dto.TaskCreateRequest;
@@ -19,6 +21,7 @@ public class TaskService {
 
 	private final TaskRepository taskRepository;
 	private final UserRepository userRepository;
+	private final Clock clock;
 
 	/**
 	 * assigneeId가 null이면 전체를 돌려준다. 등록 순.
@@ -55,7 +58,7 @@ public class TaskService {
 	public void delete(Long taskId, Long requesterId) {
 		Task task = findTask(taskId);
 		validateAssignee(task, requesterId);
-		task.markDeleted();
+		task.markDeleted(LocalDateTime.now(clock));
 	}
 
 	/**

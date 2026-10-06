@@ -122,7 +122,7 @@ class ScheduleApiTest {
 		saveSchedule("9월 30일 자정에 끝남", "2026-09-30T22:00", "2026-10-01T00:00", dad);
 		saveSchedule("11월 일정", "2026-11-01T00:00", "2026-11-01T01:00", mom);
 		Schedule deleted = saveSchedule("삭제된 일정", "2026-10-20T10:00", "2026-10-20T11:00", mom);
-		deleted.markDeleted();
+		deleted.markDeleted(LocalDateTime.now());
 		scheduleRepository.save(deleted);
 
 		perform(get("/api/schedules").param("year", "2026").param("month", "10"), mom, null)
