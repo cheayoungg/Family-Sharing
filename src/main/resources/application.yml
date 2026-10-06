@@ -10,6 +10,12 @@ spring:
   # 모든 프로필에 적용해, 트랜잭션 밖 지연 로딩(LazyInitializationException)이 운영에서 처음 드러나지 않게 한다
   jpa:
     open-in-view: false
+    # 사용자가 모두 한국에 있어 시각을 UTC로 바꾸지 않고 한국 시각 그대로 LocalDateTime으로 저장한다.
+    # 시각은 Clock(Asia/Seoul)으로 만든다. hibernate.jdbc.time_zone은 두지 않는다: JVM 시간대와 다르면
+    # Hibernate가 LocalDateTime을 그 차이만큼 바꿔 저장해 오히려 한국 시각이 어긋난다 (예: JVM이 시드니·UTC일 때)
+  # 응답의 시간대 있는 타입(Date 등)도 한국 시간으로 직렬화한다. LocalDateTime 응답 형식은 바뀌지 않는다
+  jackson:
+    time-zone: Asia/Seoul
 
 # 배포 헬스체크(Docker HEALTHCHECK, 로드밸런서)용으로 health만 연다. 상세 정보(DB 종류 등)는 응답에 넣지 않는다
 management:

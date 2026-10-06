@@ -11,6 +11,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.LocalDateTime;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -115,7 +117,7 @@ class TaskApiTest {
 		saveTask("분리수거", dad);
 		saveTask("빨래", mom);
 		Task deleted = saveTask("삭제된 할 일", mom);
-		deleted.markDeleted();
+		deleted.markDeleted(LocalDateTime.now());
 		taskRepository.save(deleted);
 
 		perform(get("/api/tasks").param("assigneeId", String.valueOf(mom.getId())), mom, null)

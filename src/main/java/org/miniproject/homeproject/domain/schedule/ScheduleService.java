@@ -1,5 +1,6 @@
 package org.miniproject.homeproject.domain.schedule;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
@@ -23,6 +24,7 @@ public class ScheduleService {
 
 	private final ScheduleRepository scheduleRepository;
 	private final UserRepository userRepository;
+	private final Clock clock;
 
 	@Transactional(readOnly = true)
 	public List<ScheduleResponse> getMonthlySchedules(int year, int month) {
@@ -87,7 +89,7 @@ public class ScheduleService {
 	public void delete(Long scheduleId, Long requesterId) {
 		Schedule schedule = findSchedule(scheduleId);
 		validateAssignee(schedule, requesterId);
-		schedule.markDeleted();
+		schedule.markDeleted(LocalDateTime.now(clock));
 	}
 
 	/**

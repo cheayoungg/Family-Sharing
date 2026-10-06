@@ -11,6 +11,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.time.LocalDateTime;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -106,7 +108,7 @@ class SharedNoteApiTest {
 		saveNote("가스 점검", "공지");
 		saveNote("우유 사 와", "부탁");
 		SharedNote deleted = saveNote("삭제된 공유사항", "부탁");
-		deleted.markDeleted();
+		deleted.markDeleted(LocalDateTime.now());
 		sharedNoteRepository.save(deleted);
 
 		perform(get("/api/notes").param("category", "부탁"), null)

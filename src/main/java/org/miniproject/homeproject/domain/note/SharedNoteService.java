@@ -1,5 +1,7 @@
 package org.miniproject.homeproject.domain.note;
 
+import java.time.Clock;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.miniproject.homeproject.domain.note.dto.SharedNoteCreateRequest;
@@ -16,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 public class SharedNoteService {
 
 	private final SharedNoteRepository sharedNoteRepository;
+	private final Clock clock;
 
 	/**
 	 * category가 null이면 전체를 돌려준다. 최신 글이 위로.
@@ -42,7 +45,7 @@ public class SharedNoteService {
 
 	@Transactional
 	public void delete(Long noteId) {
-		findNote(noteId).markDeleted();
+		findNote(noteId).markDeleted(LocalDateTime.now(clock));
 	}
 
 	private SharedNote findNote(Long noteId) {

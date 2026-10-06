@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -125,7 +126,7 @@ class ExpenseApiTest {
 		saveExpense("통신비", "2026-10-20", false);
 		saveExpense("보험료", "2026-10-05", true);
 		Expense deleted = saveExpense("삭제된 지출", "2026-10-01", false);
-		deleted.markDeleted();
+		deleted.markDeleted(LocalDateTime.now());
 		expenseRepository.save(deleted);
 
 		perform(get("/api/expenses").param("status", "UNPAID"), null)

@@ -81,6 +81,9 @@ services:
     restart: unless-stopped
     # 볼륨이 비어 있을 때(처음 한 번)만 이 계정·DB를 만든다. 이후 값을 바꿔도 반영되지 않는다
     environment:
+      # 컨테이너 OS 시간대(쉘에서 date 등). PostgreSQL 자체의 timezone 설정은 UTC 그대로다.
+      # 앱은 시각을 시간대 없는 timestamp에 한국 시각으로 직접 넣으므로(Clock) DB timezone의 영향을 받지 않는다
+      TZ: Asia/Seoul
       POSTGRES_DB: ${DB_NAME:?DB_NAME을 .env에 설정하세요}
       POSTGRES_USER: ${DB_USERNAME:?DB_USERNAME을 .env에 설정하세요}
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD를 .env에 설정하세요}

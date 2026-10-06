@@ -33,7 +33,8 @@ public abstract class BaseEntity {
 
 	private LocalDateTime deletedAt;
 
-	public void markDeleted() {
-		this.deletedAt = LocalDateTime.now();
+	// 엔티티는 Clock을 주입받을 수 없으므로, 삭제 시각은 서비스가 Clock으로 만들어 넘긴다
+	public void markDeleted(LocalDateTime deletedAt) {
+		this.deletedAt = deletedAt;
 	}
 }
